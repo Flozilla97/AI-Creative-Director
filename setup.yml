@@ -1,0 +1,14 @@
+name: Setup AI Creative Director
+
+on:
+  workflow_dispatch:  # This allows manual triggering from the GitHub UI
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Run setup script
+        run: |
+          chmod +x setup-script
+          ./setup-script
