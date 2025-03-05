@@ -1,0 +1,182 @@
+#!/bin/bash
+# AI Creative Director - Setup Script
+
+echo "Setting up AI Creative Director environment..."
+
+# Create project directory structure
+mkdir -p ai_creative_director/{data,analysis,evaluations,examples,logs,models}
+mkdir -p ai_creative_director/data/{raw,processed}
+mkdir -p ai_creative_director/ui
+mkdir -p ai_creative_director/config
+
+# Create Python virtual environment
+python -m venv ai_creative_director/venv
+source ai_creative_director/venv/bin/activate
+
+# Install required packages
+pip install --upgrade pip
+pip install numpy==1.24.3 
+pip install pandas==2.0.2
+pip install matplotlib==3.7.1
+pip install scikit-learn==1.2.2
+pip install opencv-python==4.7.0.72
+pip install pillow==9.5.0
+pip install streamlit==1.23.1
+pip install plotly==5.14.1
+pip install requests==2.31.0
+pip install beautifulsoup4==4.12.2
+pip install selenium==4.9.1
+pip install pytesseract==0.3.10
+pip install tqdm==4.65.0
+pip install colormath==3.0.0
+pip install webdriver-manager==3.8.6
+
+# Create requirements.txt for future reference
+pip freeze > ai_creative_director/requirements.txt
+
+echo "Creating configuration file..."
+cat > ai_creative_director/config/config.json << EOL
+{
+    "data_dir": "data",
+    "analysis_dir": "analysis",
+    "evaluations_dir": "evaluations",
+    "examples_dir": "examples",
+    "logs_dir": "logs",
+    "reference_url": "https://godly.website",
+    "scraper": {
+        "max_pages": 10,
+        "max_sites": 50,
+        "delay_seconds": 2
+    },
+    "analysis": {
+        "color_clusters": 5,
+        "min_button_size": 44,
+        "min_text_confidence": 30
+    },
+    "evaluation": {
+        "categories": ["typography", "buttons", "brand_character"]
+    }
+}
+EOL
+
+echo "Creating README..."
+cat > ai_creative_director/README.md << EOL
+# AI Creative Director
+
+AI-powered design evaluation based on the 10x Designer framework.
+
+## Setup
+
+1. Activate the virtual environment:
+   \`\`\`
+   source venv/bin/activate
+   \`\`\`
+
+2. Run the data collection:
+   \`\`\`
+   python scripts/scrape_godly.py
+   \`\`\`
+
+3. Run the design analysis:
+   \`\`\`
+   python scripts/analyze_designs.py
+   \`\`\`
+
+4. Start the UI:
+   \`\`\`
+   cd ui
+   streamlit run app.py
+   \`\`\`
+
+## Directory Structure
+
+- \`data/\`: Raw and processed design data
+- \`analysis/\`: Analysis results
+- \`evaluations/\`: Design evaluations
+- \`examples/\`: Example designs and evaluations
+- \`logs/\`: Log files
+- \`models/\`: Trained models
+- \`scripts/\`: Python scripts
+- \`ui/\`: Streamlit web interface
+- \`config/\`: Configuration files
+
+## Requirements
+
+- Python 3.8+
+- Chrome WebDriver for Selenium
+- Tesseract OCR for text recognition
+EOL
+
+echo "Copying scripts..."
+mkdir -p ai_creative_director/scripts
+
+# Create a small test script
+cat > ai_creative_director/scripts/test_setup.py << EOL
+#!/usr/bin/env python3
+import sys
+import os
+import json
+
+def test_imports():
+    """Test that all required packages are installed"""
+    try:
+        import numpy
+        import pandas
+        import matplotlib
+        import sklearn
+        import cv2
+        import PIL
+        import streamlit
+        import plotly
+        import requests
+        import bs4
+        import selenium
+        import pytesseract
+        import tqdm
+        import colormath
+        print("✅ All required packages imported successfully")
+    except ImportError as e:
+        print(f"❌ Import error: {e}")
+        return False
+    return True
+
+def test_directories():
+    """Test that all required directories exist"""
+    with open('config/config.json', 'r') as f:
+        config = json.load(f)
+    
+    directories = [
+        config['data_dir'],
+        config['analysis_dir'],
+        config['evaluations_dir'],
+        config['examples_dir'],
+        config['logs_dir'],
+        os.path.join(config['data_dir'], 'raw'),
+        os.path.join(config['data_dir'], 'processed')
+    ]
+    
+    for directory in directories:
+        if not os.path.exists(directory):
+            print(f"❌ Directory not found: {directory}")
+            return False
+    
+    print("✅ All required directories exist")
+    return True
+
+if __name__ == "__main__":
+    print("Testing AI Creative Director setup...")
+    imports_ok = test_imports()
+    dirs_ok = test_directories()
+    
+    if imports_ok and dirs_ok:
+        print("✅ Setup successful! The environment is ready.")
+    else:
+        print("❌ Setup incomplete. Please check the errors above.")
+EOL
+
+echo "Setup complete! Navigate to the project directory:"
+echo "cd ai_creative_director"
+echo "Activate the virtual environment:"
+echo "source venv/bin/activate"
+echo "Test the setup:"
+echo "python scripts/test_setup.py"
