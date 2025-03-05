@@ -1,0 +1,747 @@
+#!/usr/bin/env python3
+"""
+AI Creative Director Integration Module
+Integrates all components of the AI Creative Director system
+"""
+
+import os
+import sys
+import json
+import logging
+import argparse
+import pandas as pd
+import numpy as np
+from datetime import datetime
+import matplotlib.pyplot as plt
+import glob
+from PIL import Image
+import cv2
+import random
+from tqdm import tqdm
+import shutil
+
+# Set up argument parser
+parser = argparse.ArgumentParser(description='AI Creative Director Integration')
+parser.add_argument('--godly-dir', type=str, default='analysis', help='Directory containing godly.website analysis')
+parser.add_argument('--library-dir', type=str, default='analysis/library', help='Directory containing library analysis')
+parser.add_argument('--output-dir', type=str, default='ai_director', help='Output directory for AI Director')
+parser.add_argument('--log-file', type=str, default='logs/ai_director.log', help='Log file path')
+parser.add_argument('--config-file', type=str, default='config/ai_director_config.json', help='Configuration file path')
+args = parser.parse_args()
+
+# Create directories if they don't exist
+os.makedirs(os.path.dirname(args.log_file), exist_ok=True)
+os.makedirs(args.output_dir, exist_ok=True)
+os.makedirs(os.path.join(args.output_dir, 'models'), exist_ok=True)
+os.makedirs(os.path.join(args.output_dir, 'examples'), exist_ok=True)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(args.log_file),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("AIDirector")
+
+class AICreativeDirector:
+    def __init__(self, godly_dir, library_dir, output_dir, config_file=None):
+        self.godly_dir = godly_dir
+        self.library_dir = library_dir
+        self.output_dir = output_dir
+        
+        # Load configuration
+        self.config = self._load_config(config_file)
+        
+        # Initialize components
+        self.godly_data = self._load_godly_data()
+        self.library_data = self._load_library_data()
+        
+        # Combined reference standards
+        self.reference_standards = self._create_reference_standards()
+        
+        # Top examples by category
+        self.top_examples = self._find_top_examples()
+    
+    def _load_config(self, config_file):
+        """Load configuration file"""
+        default_config = {
+            'categories': ['typography', 'buttons', 'brand_character'],
+            'evaluation': {
+                'typography_weight': 0.35,
+                'buttons_weight': 0.25,
+                'brand_character_weight': 0.4,
+                'metrics': {
+                    'typography': [
+                        {'name': 'size_ratio', 'weight': 0.5, 'ideal_range': [2.5, 4.0]},
+                        {'name': 'text_blocks', 'weight': 0.3, 'ideal_min': 5},
+                        {'name': 'headings', 'weight': 0.2, 'ideal_range': [2, 4]}
+                    ],
+                    'buttons': [
+                        {'name': 'touch_friendly', 'weight': 0.4, 'ideal_min': 80},
+                        {'name': 'hierarchy', 'weight': 0.4, 'ideal_min': 70},
+                        {'name': 'count', 'weight': 0.2, 'ideal_range': [3, 8]}
+                    ],
+                    'brand_character': [
+                        {'name': 'color_harmony', 'weight': 0.4, 'ideal_min': 75},
+                        {'name': 'white_space', 'weight': 0.3, 'ideal_range': [25, 45]},
+                        {'name': 'golden_ratio', 'weight': 0.3, 'ideal_min': 80}
+                    ]
+                }
+            },
+            'example_count': 5,  # Number of examples to show for each category
+            'highlight_categories': [
+                'Animation', 'Storytelling', 'Micro-interactions',
+                'Typography', 'Layout', 'Color', 'Brand', 'Conversion'
+            ]
+        }
+        
+        if not config_file or not os.path.exists(config_file):
+            logger.warning(f"Configuration file not found: {config_file}")
+            return default_config
+        
+        try:
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+            
+            logger.info(f"Loaded configuration from {config_file}")
+            return config
+        except Exception as e:
+            logger.error(f"Error loading configuration: {e}")
+            return default_config
+    
+    def _load_godly_data(self):
+        """Load godly.website analysis data"""
+        # Check for aggregate report
+        aggregate_path = os.path.join(self.godly_dir, "aggregate_report.json")
+        
+        if not os.path.exists(aggregate_path):
+            logger.warning("Godly website aggregate report not found")
+            return None
+        
+        try:
+            with open(aggregate_path, 'r') as f:
+                aggregate = json.load(f)
+            
+            # Load analysis index if available
+            index_path = os.path.join(self.godly_dir, "analysis_index.json")
+            analyses = []
+            
+            if os.path.exists(index_path):
+                with open(index_path, 'r') as f:
+                    analyses = json.load(f)
+            
+            logger.info(f"Loaded godly.website data: {len(analyses)} analyses")
+            
+            return {
+                'aggregate': aggregate,
+                'analyses': analyses
+            }
+        except Exception as e:
+            logger.error(f"Error loading godly website data: {e}")
+            return None
+    
+    def _load_library_data(self):
+        """Load website library analysis data"""
+        # Check for aggregate analysis
+        aggregate_path = os.path.join(self.library_dir, "library_aggregate_analysis.json")
+        
+        if not os.path.exists(aggregate_path):
+            logger.warning("Library aggregate analysis not found")
+            return None
+        
+        try:
+            with open(aggregate_path, 'r') as f:
+                aggregate = json.load(f)
+            
+            # Load analysis index if available
+            index_path = os.path.join(self.library_dir, "library_analysis_index.json")
+            analyses = []
+            
+            if os.path.exists(index_path):
+                with open(index_path, 'r') as f:
+                    analyses = json.load(f)
+            
+            logger.info(f"Loaded website library data: {len(analyses)} analyses")
+            
+            return {
+                'aggregate': aggregate,
+                'analyses': analyses
+            }
+        except Exception as e:
+            logger.error(f"Error loading library data: {e}")
+            return None
+    
+    def _create_reference_standards(self):
+        """Create combined reference standards from godly and library data"""
+        standards = {
+            'typography': {
+                'avg_text_blocks': 15,
+                'avg_size_ratio': 3.0,
+                'avg_headings': 3
+            },
+            'buttons': {
+                'avg_button_count': 5,
+                'avg_touch_friendly': 60,
+                'avg_hierarchy': 70
+            },
+            'brand_character': {
+                'avg_color_count': 4,
+                'avg_harmony': 70,
+                'avg_white_space': 30,
+                'avg_golden_ratio': 75
+            }
+        }
+        
+        # Update from godly data if available
+        if self.godly_data and 'aggregate' in self.godly_data:
+            godly_agg = self.godly_data['aggregate']
+            
+            if 'typography_analysis' in godly_agg:
+                typo = godly_agg['typography_analysis']
+                standards['typography'].update({
+                    'avg_text_blocks': typo.get('avg_text_blocks', standards['typography']['avg_text_blocks']),
+                    'avg_size_ratio': typo.get('avg_size_ratio', standards['typography']['avg_size_ratio']),
+                    'avg_headings': typo.get('avg_headings', standards['typography']['avg_headings'])
+                })
+            
+            if 'button_analysis' in godly_agg:
+                btn = godly_agg['button_analysis']
+                standards['buttons'].update({
+                    'avg_button_count': btn.get('avg_buttons', standards['buttons']['avg_button_count']),
+                    'avg_touch_friendly': btn.get('avg_touch_friendly', standards['buttons']['avg_touch_friendly']),
+                    'avg_hierarchy': btn.get('avg_hierarchy', standards['buttons']['avg_hierarchy'])
+                })
+            
+            if 'color_analysis' in godly_agg and 'layout_analysis' in godly_agg:
+                color = godly_agg['color_analysis']
+                layout = godly_agg['layout_analysis']
+                
+                standards['brand_character'].update({
+                    'avg_color_count': color.get('avg_colors', standards['brand_character']['avg_color_count']),
+                    'avg_harmony': color.get('avg_harmony', standards['brand_character']['avg_harmony']),
+                    'avg_white_space': layout.get('avg_white_space', standards['brand_character']['avg_white_space']),
+                    'avg_golden_ratio': layout.get('avg_golden_ratio', standards['brand_character']['avg_golden_ratio'])
+                })
+        
+        # Update from library data if available
+        if self.library_data and 'aggregate' in self.library_data:
+            lib_agg = self.library_data['aggregate']
+            
+            if 'typography_analysis' in lib_agg:
+                typo = lib_agg['typography_analysis']
+                
+                # Blend godly and library standards (70% godly, 30% library)
+                standards['typography'].update({
+                    'avg_text_blocks': (standards['typography']['avg_text_blocks'] * 0.7 + 
+                                      typo.get('avg_text_blocks', standards['typography']['avg_text_blocks']) * 0.3),
+                    'avg_size_ratio': (standards['typography']['avg_size_ratio'] * 0.7 + 
+                                     typo.get('avg_size_ratio', standards['typography']['avg_size_ratio']) * 0.3),
+                    'avg_headings': (standards['typography']['avg_headings'] * 0.7 + 
+                                   typo.get('avg_headings', standards['typography']['avg_headings']) * 0.3)
+                })
+            
+            if 'button_analysis' in lib_agg:
+                btn = lib_agg['button_analysis']
+                
+                standards['buttons'].update({
+                    'avg_button_count': (standards['buttons']['avg_button_count'] * 0.7 + 
+                                       btn.get('avg_buttons', standards['buttons']['avg_button_count']) * 0.3),
+                    'avg_touch_friendly': (standards['buttons']['avg_touch_friendly'] * 0.7 + 
+                                         btn.get('avg_touch_friendly', standards['buttons']['avg_touch_friendly']) * 0.3),
+                    'avg_hierarchy': (standards['buttons']['avg_hierarchy'] * 0.7 + 
+                                    btn.get('avg_hierarchy', standards['buttons']['avg_hierarchy']) * 0.3)
+                })
+            
+            if 'color_analysis' in lib_agg and 'layout_analysis' in lib_agg:
+                color = lib_agg['color_analysis']
+                layout = lib_agg['layout_analysis']
+                
+                standards['brand_character'].update({
+                    'avg_color_count': (standards['brand_character']['avg_color_count'] * 0.7 + 
+                                      color.get('avg_colors', standards['brand_character']['avg_color_count']) * 0.3),
+                    'avg_harmony': (standards['brand_character']['avg_harmony'] * 0.7 + 
+                                  color.get('avg_harmony', standards['brand_character']['avg_harmony']) * 0.3),
+                    'avg_white_space': (standards['brand_character']['avg_white_space'] * 0.7 + 
+                                      layout.get('avg_white_space', standards['brand_character']['avg_white_space']) * 0.3),
+                    'avg_golden_ratio': (standards['brand_character']['avg_golden_ratio'] * 0.7 + 
+                                       layout.get('avg_golden_ratio', standards['brand_character']['avg_golden_ratio']) * 0.3)
+                })
+        
+        logger.info("Created combined reference standards")
+        return standards
+    
+    def _find_top_examples(self):
+        """Find top examples for each category from both godly and library data"""
+        examples = {
+            'typography': [],
+            'buttons': [],
+            'brand_character': [],
+            'highlights': {}
+        }
+        
+        # Extract from godly data
+        if self.godly_data and 'analyses' in self.godly_data:
+            for analysis in self.godly_data['analyses']:
+                # Check typography
+                if 'typography_analysis' in analysis and 'size_analysis' in analysis['typography_analysis']:
+                    size_ratio = analysis['typography_analysis']['size_analysis'].get('size_ratio', 0)
+                    if 2.5 <= size_ratio <= 4.0:  # Good typography ratio
+                        examples['typography'].append({
+                            'id': analysis['website_id'],
+                            'score': size_ratio,
+                            'title': analysis.get('title', 'Unknown'),
+                            'url': analysis.get('website_url', ''),
+                            'source': 'godly'
+                        })
+                
+                # Check buttons
+                if 'buttons' in analysis and analysis['buttons'].get('count', 0) > 0:
+                    touch_friendly = analysis['buttons'].get('touch_friendly_percentage', 0)
+                    hierarchy = analysis['buttons'].get('button_hierarchy_score', 0)
+                    if touch_friendly >= 80 or hierarchy >= 80:  # Good button design
+                        examples['buttons'].append({
+                            'id': analysis['website_id'],
+                            'score': (touch_friendly + hierarchy) / 2,
+                            'title': analysis.get('title', 'Unknown'),
+                            'url': analysis.get('website_url', ''),
+                            'source': 'godly'
+                        })
+                
+                # Check brand character
+                if 'color_analysis' in analysis and 'layout_analysis' in analysis:
+                    harmony = analysis['color_analysis'].get('harmony_score', 0)
+                    white_space = analysis['layout_analysis'].get('white_space_percentage', 0)
+                    golden_ratio = analysis['layout_analysis'].get('golden_ratio_score', 0)
+                    
+                    if harmony >= 75 or golden_ratio >= 80:  # Good brand character
+                        examples['brand_character'].append({
+                            'id': analysis['website_id'],
+                            'score': (harmony + golden_ratio) / 2,
+                            'title': analysis.get('title', 'Unknown'),
+                            'url': analysis.get('website_url', ''),
+                            'source': 'godly'
+                        })
+        
+        # Extract from library data
+        if self.library_data and 'analyses' in self.library_data:
+            for analysis in self.library_data['analyses']:
+                # Check typography
+                if 'typography_analysis' in analysis and 'size_analysis' in analysis['typography_analysis']:
+                    size_ratio = analysis['typography_analysis']['size_analysis'].get('size_ratio', 0)
+                    if 2.5 <= size_ratio <= 4.0:  # Good typography ratio
+                        examples['typography'].append({
+                            'id': analysis['website_id'],
+                            'score': size_ratio,
+                            'title': analysis.get('title', 'Unknown'),
+                            'url': analysis.get('url', ''),
+                            'source': 'library'
+                        })
+                
+                # Check buttons
+                if 'buttons' in analysis and analysis['buttons'].get('count', 0) > 0:
+                    touch_friendly = analysis['buttons'].get('touch_friendly_percentage', 0)
+                    hierarchy = analysis['buttons'].get('button_hierarchy_score', 0)
+                    if touch_friendly >= 80 or hierarchy >= 80:  # Good button design
+                        examples['buttons'].append({
+                            'id': analysis['website_id'],
+                            'score': (touch_friendly + hierarchy) / 2,
+                            'title': analysis.get('title', 'Unknown'),
+                            'url': analysis.get('url', ''),
+                            'source': 'library'
+                        })
+                
+                # Check brand character
+                if 'color_analysis' in analysis and 'layout_analysis' in analysis:
+                    harmony = analysis['color_analysis'].get('harmony_score', 0)
+                    white_space = analysis['layout_analysis'].get('white_space_percentage', 0)
+                    golden_ratio = analysis['layout_analysis'].get('golden_ratio_score', 0)
+                    
+                    if harmony >= 75 or golden_ratio >= 80:  # Good brand character
+                        examples['brand_character'].append({
+                            'id': analysis['website_id'],
+                            'score': (harmony + golden_ratio) / 2,
+                            'title': analysis.get('title', 'Unknown'),
+                            'url': analysis.get('url', ''),
+                            'source': 'library'
+                        })
+                
+                # Collect by highlights
+                for highlight in analysis.get('highlights', []):
+                    if highlight:
+                        if highlight not in examples['highlights']:
+                            examples['highlights'][highlight] = []
+                        
+                        examples['highlights'][highlight].append({
+                            'id': analysis['website_id'],
+                            'title': analysis.get('title', 'Unknown'),
+                            'url': analysis.get('url', ''),
+                            'source': 'library'
+                        })
+        
+        # Sort each category by score and take top examples
+        example_count = self.config.get('example_count', 5)
+        
+        for category in ['typography', 'buttons', 'brand_character']:
+            examples[category].sort(key=lambda x: x['score'], reverse=True)
+            examples[category] = examples[category][:example_count]
+        
+        # Format highlights
+        for highlight, sites in examples['highlights'].items():
+            # Shuffle to get random selection if too many
+            if len(sites) > example_count:
+                random.shuffle(sites)
+                examples['highlights'][highlight] = sites[:example_count]
+        
+        logger.info(f"Found {len(examples['typography'])} typography examples, {len(examples['buttons'])} button examples, {len(examples['brand_character'])} brand examples")
+        return examples
+    
+    def create_example_showcase(self):
+        """Create an example showcase of top designs"""
+        examples_dir = os.path.join(self.output_dir, 'examples')
+        
+        # Ensure directory exists
+        os.makedirs(examples_dir, exist_ok=True)
+        
+        # Track examples we'll include
+        included_examples = []
+        
+        # Process category examples
+        for category in ['typography', 'buttons', 'brand_character']:
+            category_dir = os.path.join(examples_dir, category)
+            os.makedirs(category_dir, exist_ok=True)
+            
+            for example in self.top_examples[category]:
+                example_id = example['id']
+                source = example['source']
+                
+                # Copy the analysis file
+                src_dir = self.godly_dir if source == 'godly' else self.library_dir
+                analysis_path = os.path.join(src_dir, f"{example_id}_analysis.json")
+                
+                if os.path.exists(analysis_path):
+                    # Copy analysis to examples directory
+                    dst_path = os.path.join(category_dir, f"{example_id}_analysis.json")
+                    shutil.copy(analysis_path, dst_path)
+                    
+                    # Find and copy screenshot if available
+                    if source == 'godly':
+                        screenshot_dir = os.path.join(os.path.dirname(self.godly_dir), 'data', 'raw', 'godly', 'screenshots')
+                    else:
+                        screenshot_dir = os.path.join(os.path.dirname(self.library_dir), 'data', 'library', 'screenshots')
+                    
+                    screenshot_path = os.path.join(screenshot_dir, f"{example_id}.png")
+                    if not os.path.exists(screenshot_path):
+                        screenshot_path = os.path.join(screenshot_dir, f"{example_id}.jpg")
+                    
+                    if os.path.exists(screenshot_path):
+                        dst_img_path = os.path.join(highlight_dir, f"{example_id}.jpg")
+                        # Convert to JPG if needed
+                        img = Image.open(screenshot_path)
+                        img.convert('RGB').save(dst_img_path)
+                    
+                    included_examples.append({
+                        'id': example_id,
+                        'category': 'highlight',
+                        'highlight': highlight,
+                        'title': example['title'],
+                        'url': example['url'],
+                        'source': source
+                    })
+        
+        # Create index of examples
+        index_path = os.path.join(examples_dir, "examples_index.json")
+        with open(index_path, 'w') as f:
+            json.dump(included_examples, f, indent=2)
+        
+        logger.info(f"Created example showcase with {len(included_examples)} examples")
+        return included_examples
+    
+    def create_reference_model(self):
+        """Create a reference model combining standards and examples"""
+        models_dir = os.path.join(self.output_dir, 'models')
+        
+        # Ensure directory exists
+        os.makedirs(models_dir, exist_ok=True)
+        
+        # Create reference model
+        reference_model = {
+            'standards': self.reference_standards,
+            'top_examples': self.top_examples,
+            'config': self.config,
+            'created_at': datetime.now().isoformat()
+        }
+        
+        # Add additional metadata from aggregate reports
+        if self.godly_data and 'aggregate' in self.godly_data:
+            reference_model['godly_metrics'] = {
+                'avg_scores': {
+                    'typography': self.godly_data['aggregate'].get('typography_analysis', {}),
+                    'buttons': self.godly_data['aggregate'].get('button_analysis', {}),
+                    'brand_character': {
+                        'color': self.godly_data['aggregate'].get('color_analysis', {}),
+                        'layout': self.godly_data['aggregate'].get('layout_analysis', {})
+                    }
+                }
+            }
+        
+        if self.library_data and 'aggregate' in self.library_data:
+            reference_model['library_metrics'] = {
+                'categories': self.library_data['aggregate'].get('categories', {}),
+                'highlights': self.library_data['aggregate'].get('highlights', {}),
+                'avg_scores': {
+                    'typography': self.library_data['aggregate'].get('typography_analysis', {}),
+                    'buttons': self.library_data['aggregate'].get('button_analysis', {}),
+                    'brand_character': {
+                        'color': self.library_data['aggregate'].get('color_analysis', {}),
+                        'layout': self.library_data['aggregate'].get('layout_analysis', {})
+                    }
+                }
+            }
+        
+        # Save reference model
+        model_path = os.path.join(models_dir, "reference_model.json")
+        with open(model_path, 'w') as f:
+            json.dump(reference_model, f, indent=2)
+        
+        logger.info(f"Created reference model at {model_path}")
+        return reference_model
+    
+    def create_visualization(self):
+        """Create visualization of the AI Director's reference model and examples"""
+        try:
+            # Create figure
+            plt.figure(figsize=(15, 10))
+            
+            # Plot reference standards
+            plt.subplot(2, 2, 1)
+            
+            categories = ['Typography', 'Buttons', 'Brand Character']
+            metrics = [
+                [
+                    self.reference_standards['typography']['avg_size_ratio'],
+                    self.reference_standards['typography']['avg_text_blocks'],
+                    self.reference_standards['typography']['avg_headings']
+                ],
+                [
+                    self.reference_standards['buttons']['avg_touch_friendly'],
+                    self.reference_standards['buttons']['avg_hierarchy'],
+                    self.reference_standards['buttons']['avg_button_count'] * 10  # Scale for visualization
+                ],
+                [
+                    self.reference_standards['brand_character']['avg_harmony'],
+                    self.reference_standards['brand_character']['avg_white_space'],
+                    self.reference_standards['brand_character']['avg_golden_ratio']
+                ]
+            ]
+            
+            # Create a grouped bar chart
+            x = np.arange(len(categories))
+            width = 0.25
+            
+            plt.bar(x - width, [m[0] for m in metrics], width, label='Metric 1')
+            plt.bar(x, [m[1] for m in metrics], width, label='Metric 2')
+            plt.bar(x + width, [m[2] for m in metrics], width, label='Metric 3')
+            
+            plt.ylabel('Score')
+            plt.title('Reference Standards by Category')
+            plt.xticks(x, categories)
+            plt.legend()
+            
+            # Plot top examples by category count
+            plt.subplot(2, 2, 2)
+            
+            categories = ['Typography', 'Buttons', 'Brand', 'Highlights']
+            counts = [
+                len(self.top_examples['typography']),
+                len(self.top_examples['buttons']),
+                len(self.top_examples['brand_character']),
+                sum(len(examples) for examples in self.top_examples['highlights'].values())
+            ]
+            
+            plt.bar(categories, counts)
+            plt.title('Top Examples by Category')
+            plt.ylabel('Count')
+            
+            # Plot highlight distribution
+            plt.subplot(2, 2, 3)
+            
+            if self.top_examples['highlights']:
+                highlights = list(self.top_examples['highlights'].keys())
+                highlight_counts = [len(self.top_examples['highlights'][h]) for h in highlights]
+                
+                # Sort by count
+                sorted_indices = sorted(range(len(highlight_counts)), key=lambda i: highlight_counts[i], reverse=True)
+                highlights = [highlights[i] for i in sorted_indices]
+                highlight_counts = [highlight_counts[i] for i in sorted_indices]
+                
+                # Limit to top 10 if needed
+                if len(highlights) > 10:
+                    highlights = highlights[:10]
+                    highlight_counts = highlight_counts[:10]
+                
+                plt.barh(highlights, highlight_counts)
+                plt.title('Top Design Highlights')
+                plt.xlabel('Count')
+            else:
+                plt.text(0.5, 0.5, "No highlight data available", ha='center', va='center')
+                plt.title('Top Design Highlights')
+            
+            # Plot source distribution
+            plt.subplot(2, 2, 4)
+            
+            sources = {
+                'godly': sum(1 for e in self.top_examples['typography'] + self.top_examples['buttons'] + self.top_examples['brand_character'] 
+                           if e['source'] == 'godly'),
+                'library': sum(1 for e in self.top_examples['typography'] + self.top_examples['buttons'] + self.top_examples['brand_character'] 
+                             if e['source'] == 'library')
+            }
+            
+            # Add highlights
+            for highlight, examples in self.top_examples['highlights'].items():
+                for example in examples:
+                    sources[example['source']] = sources.get(example['source'], 0) + 1
+            
+            plt.pie(sources.values(), labels=sources.keys(), autopct='%1.1f%%')
+            plt.title('Examples by Source')
+            
+            # Save the visualization
+            output_path = os.path.join(self.output_dir, "ai_director_visualization.png")
+            plt.tight_layout()
+            plt.savefig(output_path)
+            plt.close()
+            
+            logger.info(f"Created AI Director visualization at {output_path}")
+            return output_path
+        except Exception as e:
+            logger.error(f"Error creating visualization: {e}")
+            return None
+    
+    def update_evaluator_config(self):
+        """Update the design evaluator configuration based on reference standards"""
+        evaluator_config = {
+            'reference_standards': self.reference_standards,
+            'evaluation_weights': {
+                'typography': self.config['evaluation']['typography_weight'],
+                'buttons': self.config['evaluation']['buttons_weight'],
+                'brand_character': self.config['evaluation']['brand_character_weight']
+            },
+            'metrics': self.config['evaluation']['metrics'],
+            'top_examples': {
+                category: [e['id'] for e in examples] 
+                for category, examples in self.top_examples.items() 
+                if category != 'highlights'
+            },
+            'highlight_examples': {
+                highlight: [e['id'] for e in examples]
+                for highlight, examples in self.top_examples['highlights'].items()
+            }
+        }
+        
+        # Save evaluator config
+        config_path = os.path.join(self.output_dir, "evaluator_config.json")
+        with open(config_path, 'w') as f:
+            json.dump(evaluator_config, f, indent=2)
+        
+        logger.info(f"Updated evaluator configuration at {config_path}")
+        return evaluator_config
+    
+    def run(self):
+        """Run the AI Creative Director integration process"""
+        # Create example showcase
+        self.create_example_showcase()
+        
+        # Create reference model
+        self.create_reference_model()
+        
+        # Create visualization
+        self.create_visualization()
+        
+        # Update evaluator config
+        self.update_evaluator_config()
+        
+        logger.info("AI Creative Director integration complete")
+        return True
+
+def main():
+    logger.info("Starting AI Creative Director integration")
+    
+    # Check if input directories exist
+    if not os.path.exists(args.godly_dir):
+        logger.warning(f"Godly directory not found: {args.godly_dir}")
+    
+    if not os.path.exists(args.library_dir):
+        logger.warning(f"Library directory not found: {args.library_dir}")
+    
+    # Create AI Creative Director
+    director = AICreativeDirector(
+        godly_dir=args.godly_dir,
+        library_dir=args.library_dir,
+        output_dir=args.output_dir,
+        config_file=args.config_file
+    )
+    
+    # Run integration
+    success = director.run()
+    
+    if success:
+        logger.info("AI Creative Director integration successful")
+        return 0
+    else:
+        logger.error("AI Creative Director integration failed")
+        return 1
+
+if __name__ == "__main__":
+    sys.exit(main()).path.join(category_dir, f"{example_id}.jpg")
+                        # Convert to JPG if needed
+                        img = Image.open(screenshot_path)
+                        img.convert('RGB').save(dst_img_path)
+                    
+                    included_examples.append({
+                        'id': example_id,
+                        'category': category,
+                        'title': example['title'],
+                        'url': example['url'],
+                        'score': example['score'],
+                        'source': source
+                    })
+        
+        # Process highlight examples
+        highlights_dir = os.path.join(examples_dir, 'highlights')
+        os.makedirs(highlights_dir, exist_ok=True)
+        
+        for highlight, examples in self.top_examples['highlights'].items():
+            highlight_dir = os.path.join(highlights_dir, highlight.lower().replace(' ', '_'))
+            os.makedirs(highlight_dir, exist_ok=True)
+            
+            for example in examples:
+                example_id = example['id']
+                source = example['source']
+                
+                # Skip if already included
+                if any(e['id'] == example_id for e in included_examples):
+                    continue
+                
+                # Copy the analysis file
+                src_dir = self.godly_dir if source == 'godly' else self.library_dir
+                analysis_path = os.path.join(src_dir, f"{example_id}_analysis.json")
+                
+                if os.path.exists(analysis_path):
+                    # Copy analysis to examples directory
+                    dst_path = os.path.join(highlight_dir, f"{example_id}_analysis.json")
+                    shutil.copy(analysis_path, dst_path)
+                    
+                    # Find and copy screenshot if available
+                    if source == 'godly':
+                        screenshot_dir = os.path.join(os.path.dirname(self.godly_dir), 'data', 'raw', 'godly', 'screenshots')
+                    else:
+                        screenshot_dir = os.path.join(os.path.dirname(self.library_dir), 'data', 'library', 'screenshots')
+                    
+                    screenshot_path = os.path.join(screenshot_dir, f"{example_id}.png")
+                    if not os.path.exists(screenshot_path):
+                        screenshot_path = os.path.join(screenshot_dir, f"{example_id}.jpg")
+                    
+                    if os.path.exists(screenshot_path):
+                        dst_img_path = os
