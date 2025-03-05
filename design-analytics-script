@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+"""
+Design Analysis Script for AI Creative Director
+Analyzes design features from godly.website screenshots
+"""
+
+import os
+import json
+import sys
+import logging
+import argparse
+import numpy as np
+import cv2
+from PIL import Image
+import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
+import pytesseract
+from collections import Counter
+from tqdm import tqdm
+from datetime import datetime
+import colorsys
+import glob
+
+# Set up argument parser
+parser = argparse.ArgumentParser(description='Analyze design features from godly.website screenshots')
+parser.add_argument('--config', type=str, default='config/analysis_config.json', help='Path to analysis config file')
+parser.add_argument('--input-dir', type=str, help='Override input directory')
+parser.add_argument('--output-dir', type=str, help='Override output directory')
+args = parser.parse_args()
+
+# Load configuration
+try:
+    with open(args.config, 'r') as f:
+        config = json.load(f)
+except Exception as e:
+    print(f"Error loading configuration: {e}")
+    sys.exit(1)
+
+# Override config with command line arguments if provided
+if args.input_dir:
+    config['input_directory'] = args.input_dir
+if args.output_dir:
+    config['output_directory'] = args.output_dir
+
+# Create directories if they don't exist
+os.makedirs(config['output_directory'], exist_ok=True)
+os.makedirs(os.path.dirname(config['log_file']), exist_ok=True)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(config['log_file']),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("DesignAnalyzer")
+
+class DesignAnalyzer:
+    def __init__(self, config):
+        self.config = config
+        self.input_dir = config['input_directory']
+        self.screenshots_dir = os.path.join(config['input_directory'], 'screenshots')
+        self.metadata_dir = os.path.join(config['input_directory'], 'metadata')
+        self.output_dir = config['output_directory']
+        
+        # Configure pytesseract path if specified
+        if 'tesseract_path' in config and config['tesseract_path']:
+            pytesseract.pytesseract.tesseract_cmd = config['tesseract_path']
+    
+    def load_website_data(self):
+        """Load all website data from JSON files"""
+        logger.info("Loading website data...")
+        
+        index_path = os.path.join(self.input_dir, "index.json")
+        
+        if os.path.exists(index_path):
+            with open(index_path, 'r') as f:
+                websites = json.load(f)
+            logger.info(f"Loaded {len(websites)} websites from index")
+            return websites
+        else:
+            # If index doesn't exist, build from individual files
+            logger.info("Index file not found, building from individual files")
+            websites = []
+            json_files = glob.glob(os.path.join(self.metadata_dir, "*.json"))
+            
+            for json_file in json_files:
+                try:
+                    with open(json_file, 'r') as f:
+                        websites.append(json.load(f))
+                except Exception as e:
+                    logger.error(f"Error loading {json_file}: {e}")
+            
+            logger.info(f"Loaded {len(websites)} websites from individual files")
+            return websites
+    
+    def analyze_colors(self, image_path, num_colors=5):
+        """Extract dominant colors from image using K-means clustering"""
+        try:
+            image = cv2.imread(image_path)
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            
+            # Reshape image for clustering
+            pixels = image.reshape(-1, 3)
+            
+            # Take a sample if the image is large
+            if len(pixels) > 10000:
+                indices = np.random.choice(len(pixels), 10000, replace=False)
+                pixels = pixels[indices]
+            
+            # Cluster pixels to find dominant colors
+            kmeans = KMeans(n_clusters=num_colors, n_init=10)
+            kmeans.fit(pixels)
+            
+            # Get colors and their percentage
+            colors = kmeans.cluster_centers_.astype(int)
+            pixel_labels = kmeans.labels_
+            
+            # Count labels to determine color prominence
+            counts = Counter(pixel_labels)
+            total = sum(counts.values())
+            
+            # Create color info with hex values and percentages
+            color_info = []
+            for i in range(num_colors):
+                count = counts.get(i, 0)
+                percentage = (count / total) * 100
+                
+                # Skip colors with very low presence
+                if percentage < 5:
+                    continue
+                
+                r, g, b = colors[i]
+                hex_color = f"#{r:02x}{g:02x}{b:02x}"
+                
+                # Convert to HSV for additional analysis
+                h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
+                
+                color_info.append({
+                    "hex": hex_color,
+                    "rgb": colors[i].tolist(),
+                    "hsv": [round(h*360), round(s*100), round(v*100)],
+                    "percentage": round(percentage, 2)
+                })
+            
+            # Sort by percentage (descending)
+            color_info.sort(key=lambda x: x["percentage"], reverse=True)
+            
+            # Calculate color harmony
+            harmony_score = self._analyze_color_harmony(color_info)
+            
+            return {
+                "colors": color_info,
+                "harmony_score": harmony_score,
+                "dominant_color": color_info[0] if color_info else None
+            }
+        
+        except Exception as e:
+            logger.error(f"Error analyzing colors in {image_path}: {e}")
+            return {
+                "colors": [],
+                "harmony_score": 0,
+                "dominant_color": None
+            }
+    
+    def _analyze_color_harmony(self, colors):
+        """Analyze color harmony (0-100 score)"""
+        if not colors or len(colors) < 2:
+            return 50  # Neutral score for insufficient data
+        
+        try:
+            # Extract HSV values
+            hsv_colors = [color["hsv"] for color in colors if "hsv" in color]
+            
+            if not hsv_colors:
+                return 50
+            
+            # Normalize HSV values
+            normalized_hsv = [(h/360, s/100, v/100) for h, s, v in hsv_colors]
+            
+            # Analyze hue differences (harmony often comes from complementary or analogous hues)
+            harmony_score = 50  # Start neutral
+            
+            # Check for analogous colors (similar hues)
+            hues = [h for h, _, _ in normalized_hsv]
+            hue_diffs = []
+            
+            for i in range(len(hues)):
+                for j in range(i+1, len(hues)):
+                    # Calculate smallest distance between hues (considering the circular nature)
+                    diff = min(abs(hues[i] - hues[j]), 1 - abs(hues[i] - hues[j]))
+                    hue_diffs.append(diff)
+            
+            if hue_diffs:
+                avg_diff = sum(hue_diffs) / len(hue_diffs)
+                
+                # Analogous colors (close hues)
+                if avg_diff < 0.1:
+                    harmony_score += 15
+                
+                # Complementary colors (opposite hues)
+                if any(0.45 < diff < 0.55 for diff in hue_diffs):
+                    harmony_score += 10
+                
+                # Check saturation and value consistency
+                saturations = [s for _, s, _ in normalized_hsv]
+                values = [v for _, _, v in normalized_hsv]
+                
+                sat_range = max(saturations) - min(saturations)
+                val_range = max(values) - min(values)
+                
+                # Consistent saturation and value often looks harmonious
+                if sat_range < 0.3:
+                    harmony_score += 10
+                
+                if val_range < 0.3:
+                    harmony_score += 10
+            
+            return min(100, max(0, harmony_score))
+            
+        except Exception as e:
+            logger.error(f"Error analyzing color harmony: {e}")
+            return 50
+    
+    def analyze_typography(self, image_path):
+        """Extract text and typographic features from image"""
+        try:
+            # Use Tesseract OCR to extract text
+            img = Image.open(image_path)
+            
+            # OCR with detailed configuration
+            ocr_data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
+            
+            text_blocks = []
+            fonts = []
+            sizes = []
+            
+            # Process OCR data
+            confidence_threshold = self.config.get('min_text_confidence', 30)
+            for i in range(len(ocr_data['text'])):
+                if ocr_data['text'][i].strip() and ocr_data['conf'][i] > confidence_threshold:
+                    text_block = {
+                        'text': ocr_data['text'][i],
+                        'confidence': ocr_data['conf'][i],
+                        'size': ocr_data['height'][i],  # Use height as approximation of font size
+                        'position': {
+                            'x': ocr_data['left'][i],
+                            'y': ocr_data['top'][i],
+                            'width': ocr_data['width'][i],
+                            'height': ocr_data['height'][i]
+                        }
+                    }
+                    text_blocks.append(text_block)
+                    sizes.append(ocr_data['height'][i])
+            
+            # Analyze font size distribution
+            if sizes:
+                # Filter out extreme outliers (very small or very large)
+                filtered_sizes = [s for s in sizes if s > 5 and s < 200]  # Arbitrary limits
+                
+                if filtered_sizes:
+                    min_size = min(filtered_sizes)
+                    max_size = max(filtered_sizes)
+                    avg_size = sum(filtered_sizes) / len(filtered_sizes)
+                    
+                    # Count occurrences of each size
+                    size_counts = Counter(filtered_sizes)
+                    
+                    # Find most common sizes (potential standard sizes)
+                    common_sizes = size_counts.most_common(3)
+                    
+                    # Identify potential heading sizes (significantly larger than average)
+                    potential_headings = [s for s in filtered_sizes if s > avg_size * 1.5]
+                    
+                    size_analysis = {
+                        'min_size': min_size,
+                        'max_size': max_size,
+                        'avg_size': avg_size,
+                        'common_sizes': common_sizes,
+                        'size_ratio
