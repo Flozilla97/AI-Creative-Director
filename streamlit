@@ -1,0 +1,1488 @@
+# Run button
+    if st.button("Run 10x Designer Evaluation"):
+        with st.spinner("Analyzing design..."):
+            # Run analysis script
+            st.markdown("#### Running Design Analysis...")
+            analysis_script = os.path.join(SCRIPTS_PATH, "design_analyzer.py")
+            analysis_args = [
+                "--input", image_path,
+                "--output", os.path.join(ANALYSIS_PATH, f"{design_id}_analysis.json"),
+                "--metadata", json.dumps(metadata)
+            ]
+            analysis_code = run_script(analysis_script, analysis_args)
+            
+            if analysis_code != 0:
+                st.error("Analysis failed. Please check the logs.")
+                return
+            
+            # Run evaluation script
+            st.markdown("#### Running 10x Designer Evaluation...")
+            eval_script = os.path.join(SCRIPTS_PATH, "design_evaluator.py")
+            eval_args = [
+                "--input", os.path.join(ANALYSIS_PATH, f"{design_id}_analysis.json"),
+                "--output", os.path.join(EVALUATION_PATH, f"{design_id}_evaluation.json"),
+                "--reference", os.path.join(AI_DIRECTOR_PATH, "models", "reference_model.json")
+            ]
+            eval_code = run_script(eval_script, eval_args)
+            
+            if eval_code != 0:
+                st.error("Evaluation failed. Please check the logs.")
+                return
+            
+            # Load and display evaluation
+            eval_path = os.path.join(EVALUATION_PATH, f"{design_id}_evaluation.json")
+            evaluation = load_json_file(eval_path)
+            
+            if evaluation:
+                display_evaluation(evaluation)
+            else:
+                st.error("Failed to load evaluation results.")
+
+def run_data_collection():
+    """Run data collection process"""
+    st.markdown("### Data Collection")
+    
+    collection_type = st.radio("Collection Type", ["Godly Websites", "Custom Library"])
+    
+    if collection_type == "Godly Websites":
+        # Configuration options
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            max_pages = st.number_input("Number of Pages to Scrape", min_value=1, max_value=20, value=5)
+            max_sites = st.number_input("Maximum Number of Sites", min_value=1, max_value=100, value=25)
+        
+        with col2:
+            delay = st.number_input("Delay Between Requests (seconds)", min_value=1, max_value=10, value=2)
+            st.markdown("This helps prevent overloading the server")
+        
+        # Run button
+        if st.button("Start Godly.Website Collection"):
+            with st.spinner("Collecting reference designs from godly.website..."):
+                # Run scraper script
+                scraper_script = os.path.join(SCRIPTS_PATH, "scrape_godly.py")
+                scraper_args = [
+                    "--pages", str(max_pages),
+                    "--sites", str(max_sites),
+                    "--delay", str(delay)
+                ]
+                
+                run_script(scraper_script, scraper_args)
+                
+                # Check results
+                index_path = os.path.join(GODLY_DATA_PATH, "index.json")
+                if os.path.exists(index_path):
+                    data = load_json_file(index_path)
+                    if data:
+                        st.success(f"Successfully collected {len(data)} reference designs!")
+                        
+                        # Show a sample
+                        if len(data) > 0:
+                            sample = data[0]
+                            st.markdown("#### Sample Collected Design")
+                            st.json(sample, expanded=False)
+                    else:
+                        st.error("Data collection failed or no designs found.")
+                else:
+                    st.error("Data collection failed. Index file not found.")
+    
+    else:  # Custom Library
+        st.markdown("### Import Custom Website Library")
+        
+        # Library file upload
+        uploaded_file = st.file_uploader("Upload CSV file with website library", type=['csv'])
+        
+        if uploaded_file is not None:
+            # Save the uploaded file
+            library_path = os.path.join(DATA_PATH, "library.csv")
+            with open(library_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            
+            st.success(f"Library file uploaded: {uploaded_file.name}")
+            
+            # Show options
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                max_sites = st.number_input("Maximum Sites to Process", min_value=0, max_value=1000, value=0,
+                                           help="0 means process all sites")
+            
+            with col2:
+                take_screenshots = st.checkbox("Take Screenshots", value=False, 
+                                             help="Enable to capture website screenshots (requires API key)")
+                
+                if take_screenshots:
+                    api_key = st.text_input("Screenshot API Key (optional)")
+            
+            # Run button
+            if st.button("Process Library"):
+                with st.spinner("Processing website library..."):
+                    # Run library import script
+                    import_script = os.path.join(SCRIPTS_PATH, "website_library_integration.py")
+                    import_args = [
+                        "--input", library_path,
+                        "--output-dir", LIBRARY_DATA_PATH,
+                        "--screenshot-dir", os.path.join(LIBRARY_DATA_PATH, "screenshots")
+                    ]
+                    
+                    if max_sites > 0:
+                        import_args.extend(["--max-sites", str(max_sites)])
+                    
+                    if take_screenshots:
+                        import_args.append("--take-screenshots")
+                        if api_key:
+                            import_args.extend(["--api-key", api_key])
+                    
+                    run_script(import_script, import_args)
+                    
+                    # Check results
+                    index_path = os.path.join(LIBRARY_DATA_PATH, "index.json")
+                    if os.path.exists(index_path):
+                        data = load_json_file(index_path)
+                        if data:
+                            st.success(f"Successfully processed {len(data)} websites!")
+                            
+                            # Show a sample
+                            if len(data) > 0:
+                                sample = data[0]
+                                st.markdown("#### Sample Processed Website")
+                                st.json(sample, expanded=False)
+                        else:
+                            st.error("Library processing failed or no websites found.")
+                    else:
+                        st.error("Library processing failed. Index file not found.")
+
+def run_analysis():
+    """Run design analysis process"""
+    st.markdown("### Design Analysis")
+    
+    analysis_type = st.radio("Analysis Type", ["Godly Websites", "Custom Library"])
+    
+    if analysis_type == "Godly Websites":
+        # Check if data is available
+        if not os.path.exists(GODLY_DATA_PATH):
+            st.warning("No godly.website data available. Please run data collection first.")
+            return
+        
+        # Check index file
+        index_path = os.path.join(GODLY_DATA_PATH, "index.json")
+        if not os.path.exists(index_path):
+            st.warning("No index file found. Data collection may be incomplete.")
+            return
+        
+        # Load index to show stats
+        data = load_json_file(index_path)
+        if data:
+            st.info(f"Found {len(data)} godly.website designs available for analysis")
+        
+        # Run button
+        if st.button("Start Godly.Website Analysis"):
+            with st.spinner("Analyzing designs..."):
+                # Run analyzer script
+                analyzer_script = os.path.join(SCRIPTS_PATH, "design_analyzer.py")
+                run_script(analyzer_script)
+                
+                # Check results
+                analysis_index_path = os.path.join(GODLY_ANALYSIS_PATH, "analysis_index.json")
+                if os.path.exists(analysis_index_path):
+                    analysis_data = load_json_file(analysis_index_path)
+                    if analysis_data:
+                        st.success(f"Successfully analyzed {len(analysis_data)} designs!")
+                        
+                        # Show a sample
+                        if len(analysis_data) > 0:
+                            sample = analysis_data[0]
+                            st.markdown("#### Sample Analysis")
+                            
+                            # Show color palette
+                            st.markdown("##### Color Palette")
+                            display_color_palette(sample.get('color_analysis', {}).get('extracted_colors', []))
+                            
+                            # Show some analysis data
+                            st.markdown("##### Analysis Metrics")
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.metric("Color Harmony", f"{sample.get('color_analysis', {}).get('harmony_score', 0)}/100")
+                                st.metric("Text Blocks", sample.get('typography_analysis', {}).get('text_block_count', 0))
+                                
+                            with col2:
+                                st.metric("Button Count", sample.get('buttons', {}).get('count', 0))
+                                st.metric("White Space", f"{sample.get('layout_analysis', {}).get('white_space_percentage', 0)}%")
+                    else:
+                        st.error("Analysis failed or no results found.")
+                else:
+                    st.error("Analysis failed. Index file not found.")
+    
+    else:  # Custom Library
+        # Check if data is available
+        if not os.path.exists(LIBRARY_DATA_PATH):
+            st.warning("No website library data available. Please run data collection first.")
+            return
+        
+        # Check index file
+        index_path = os.path.join(LIBRARY_DATA_PATH, "index.json")
+        if not os.path.exists(index_path):
+            st.warning("No index file found. Library import may be incomplete.")
+            return
+        
+        # Load index to show stats
+        data = load_json_file(index_path)
+        if data:
+            st.info(f"Found {len(data)} library websites available for analysis")
+        
+        # Run button
+        if st.button("Start Library Analysis"):
+            with st.spinner("Analyzing library websites..."):
+                # Run library analyzer script
+                analyzer_script = os.path.join(SCRIPTS_PATH, "library_analyzer.py")
+                analyzer_args = [
+                    "--input-dir", LIBRARY_DATA_PATH,
+                    "--output-dir", LIBRARY_ANALYSIS_PATH,
+                    "--screenshot-dir", os.path.join(LIBRARY_DATA_PATH, "screenshots")
+                ]
+                
+                run_script(analyzer_script, analyzer_args)
+                
+                # Check results
+                analysis_index_path = os.path.join(LIBRARY_ANALYSIS_PATH, "library_analysis_index.json")
+                if os.path.exists(analysis_index_path):
+                    analysis_data = load_json_file(analysis_index_path)
+                    if analysis_data:
+                        st.success(f"Successfully analyzed {len(analysis_data)} websites!")
+                        
+                        # Show aggregate results if available
+                        aggregate_path = os.path.join(LIBRARY_ANALYSIS_PATH, "library_aggregate_analysis.json")
+                        if os.path.exists(aggregate_path):
+                            aggregate = load_json_file(aggregate_path)
+                            if aggregate:
+                                st.markdown("#### Aggregate Analysis")
+                                
+                                # Show category distribution
+                                if 'categories' in aggregate:
+                                    categories = aggregate['categories']
+                                    st.markdown("##### Website Categories")
+                                    
+                                    # Create bar chart
+                                    category_df = pd.DataFrame({
+                                        'Category': list(categories.keys()),
+                                        'Count': list(categories.values())
+                                    })
+                                    
+                                    # Sort by count
+                                    category_df = category_df.sort_values('Count', ascending=False)
+                                    
+                                    # Limit to top 10
+                                    if len(category_df) > 10:
+                                        category_df = category_df.head(10)
+                                    
+                                    # Create chart
+                                    fig = px.bar(category_df, x='Category', y='Count', 
+                                                title='Website Categories',
+                                                labels={'Count': 'Number of Websites', 'Category': 'Category'})
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                                
+                                # Show highlights
+                                if 'highlights' in aggregate:
+                                    highlights = aggregate['highlights']
+                                    st.markdown("##### Design Highlights")
+                                    
+                                    # Create dataframe
+                                    highlight_df = pd.DataFrame({
+                                        'Highlight': list(highlights.keys()),
+                                        'Count': list(highlights.values())
+                                    })
+                                    
+                                    # Sort by count
+                                    highlight_df = highlight_df.sort_values('Count', ascending=False)
+                                    
+                                    # Limit to top 10
+                                    if len(highlight_df) > 10:
+                                        highlight_df = highlight_df.head(10)
+                                    
+                                    # Create chart
+                                    fig = px.bar(highlight_df, x='Count', y='Highlight', 
+                                                orientation='h',
+                                                title='Top Design Highlights',
+                                                labels={'Count': 'Number of Websites', 'Highlight': 'Design Highlight'})
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.error("Analysis failed or no results found.")
+                else:
+                    st.error("Analysis failed. Index file not found.")
+
+def run_evaluation():
+    """Run 10x Designer evaluation process"""
+    st.markdown("### 10x Designer Evaluation")
+    
+    evaluation_type = st.radio("Evaluation Type", ["Godly Websites", "Custom Library"])
+    
+    # Check if analysis data is available
+    if evaluation_type == "Godly Websites":
+        analysis_dir = GODLY_ANALYSIS_PATH
+    else:
+        analysis_dir = LIBRARY_ANALYSIS_PATH
+    
+    if not os.path.exists(analysis_dir):
+        st.warning(f"No analysis data available for {evaluation_type}. Please run design analysis first.")
+        return
+    
+    # Check for analysis files
+    analysis_files = [f for f in os.listdir(analysis_dir) if f.endswith('_analysis.json')]
+    if not analysis_files:
+        st.warning(f"No analysis files found for {evaluation_type}. Please run design analysis first.")
+        return
+    
+    st.info(f"Found {len(analysis_files)} analyzed designs available for evaluation")
+    
+    # Run button
+    if st.button(f"Start {evaluation_type} Evaluation"):
+        with st.spinner("Evaluating designs..."):
+            # Run evaluator script
+            evaluator_script = os.path.join(SCRIPTS_PATH, "design_evaluator.py")
+            evaluator_args = [
+                "--input-dir", analysis_dir,
+                "--output-dir", EVALUATION_PATH
+            ]
+            
+            run_script(evaluator_script, evaluator_args)
+            
+            # Check results
+            eval_index_path = os.path.join(EVALUATION_PATH, "evaluation_index.json")
+            if os.path.exists(eval_index_path):
+                eval_data = load_json_file(eval_index_path)
+                if eval_data:
+                    st.success(f"Successfully evaluated {len(eval_data)} designs!")
+                    
+                    # Check for aggregate report
+                    aggregate_path = os.path.join(EVALUATION_PATH, "aggregate_evaluation_report.json")
+                    if os.path.exists(aggregate_path):
+                        # Ask user if they want to view aggregate report
+                        if st.button("View Aggregate Report"):
+                            display_aggregate_report()
+                    
+                    # Show a sample
+                    if len(eval_data) > 0:
+                        sample = eval_data[0]
+                        st.markdown("#### Sample Evaluation")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.metric("Overall Score", f"{sample['overall']['score']}/100")
+                        
+                        with col2:
+                            st.metric("Thinking Level", sample['overall']['level_name'])
+                        
+                        with col3:
+                            # Find highest scoring category
+                            categories = sample['category_scores']
+                            best_category = max(categories, key=categories.get)
+                            st.metric("Strongest Category", best_category.title())
+                        
+                        # Link to full evaluation
+                        if st.button("View Full Evaluation"):
+                            display_evaluation(sample)
+                else:
+                    st.error("Evaluation failed or no results found.")
+            else:
+                st.error("Evaluation failed. Index file not found.")
+
+def run_ai_director():
+    """Run AI Creative Director integration"""
+    st.markdown("### AI Creative Director Integration")
+    
+    # Check if godly analysis is available
+    godly_available = os.path.exists(GODLY_ANALYSIS_PATH) and len([f for f in os.listdir(GODLY_ANALYSIS_PATH) if f.endswith('_analysis.json')]) > 0
+    
+    # Check if library analysis is available
+    library_available = os.path.exists(LIBRARY_ANALYSIS_PATH) and len([f for f in os.listdir(LIBRARY_ANALYSIS_PATH) if f.endswith('_analysis.json')]) > 0
+    
+    # Display status
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if godly_available:
+            st.success("✅ Godly.Website data available")
+        else:
+            st.warning("❌ Godly.Website data not available")
+    
+    with col2:
+        if library_available:
+            st.success("✅ Website Library data available")
+        else:
+            st.warning("❌ Website Library data not available")
+    
+    if not (godly_available or library_available):
+        st.warning("No analysis data available. Please run data collection and analysis first.")
+        return
+    
+    # AI Director configuration
+    st.markdown("#### Configuration")
+    
+    with st.expander("AI Director Settings"):
+        # Category weights
+        st.markdown("##### Category Weights")
+        
+        typography_weight = st.slider("Typography Weight", min_value=0.1, max_value=0.6, value=0.35, step=0.05)
+        buttons_weight = st.slider("Buttons Weight", min_value=0.1, max_value=0.6, value=0.25, step=0.05)
+        brand_weight = st.slider("Brand Character Weight", min_value=0.1, max_value=0.6, value=0.4, step=0.05)
+        
+        # Check if weights sum to 1.0
+        total_weight = typography_weight + buttons_weight + brand_weight
+        if abs(total_weight - 1.0) > 0.01:
+            st.warning(f"Weights should sum to 1.0. Current total: {total_weight:.2f}")
+        
+        # Number of examples
+        example_count = st.number_input("Number of Examples per Category", min_value=1, max_value=10, value=5)
+    
+    # Create AI Director configuration
+    config = {
+        'categories': ['typography', 'buttons', 'brand_character'],
+        'evaluation': {
+            'typography_weight': typography_weight,
+            'buttons_weight': buttons_weight,
+            'brand_character_weight': brand_weight,
+            'metrics': {
+                'typography': [
+                    {'name': 'size_ratio', 'weight': 0.5, 'ideal_range': [2.5, 4.0]},
+                    {'name': 'text_blocks', 'weight': 0.3, 'ideal_min': 5},
+                    {'name': 'headings', 'weight': 0.2, 'ideal_range': [2, 4]}
+                ],
+                'buttons': [
+                    {'name': 'touch_friendly', 'weight': 0.4, 'ideal_min': 80},
+                    {'name': 'hierarchy', 'weight': 0.4, 'ideal_min': 70},
+                    {'name': 'count', 'weight': 0.2, 'ideal_range': [3, 8]}
+                ],
+                'brand_character': [
+                    {'name': 'color_harmony', 'weight': 0.4, 'ideal_min': 75},
+                    {'name': 'white_space', 'weight': 0.3, 'ideal_range': [25, 45]},
+                    {'name': 'golden_ratio', 'weight': 0.3, 'ideal_min': 80}
+                ]
+            }
+        },
+        'example_count': example_count,
+        'highlight_categories': [
+            'Animation', 'Storytelling', 'Micro-interactions',
+            'Typography', 'Layout', 'Color', 'Brand', 'Conversion'
+        ]
+    }
+    
+    # Save configuration
+    config_path = os.path.join(CONFIG_PATH, "ai_director_config.json")
+    with open(config_path, 'w') as f:
+        json.dump(config, f, indent=2)
+    
+    # Run button
+    if st.button("Run AI Creative Director Integration"):
+        with st.spinner("Integrating design data and creating AI Creative Director..."):
+            # Run integration script
+            integration_script = os.path.join(SCRIPTS_PATH, "ai_director_integration.py")
+            integration_args = [
+                "--godly-dir", GODLY_ANALYSIS_PATH,
+                "--library-dir", LIBRARY_ANALYSIS_PATH,
+                "--output-dir", AI_DIRECTOR_PATH,
+                "--config-file", config_path
+            ]
+            
+            run_script(integration_script, integration_args)
+            
+            # Check results
+            model_path = os.path.join(AI_DIRECTOR_PATH, "models", "reference_model.json")
+            if os.path.exists(model_path):
+                st.success("AI Creative Director successfully created!")
+                
+                # Show visualization if available
+                viz_path = os.path.join(AI_DIRECTOR_PATH, "ai_director_visualization.png")
+                if os.path.exists(viz_path):
+                    st.markdown("#### AI Creative Director Overview")
+                    st.image(viz_path, use_column_width=True)
+                
+                # Show examples
+                examples_index_path = os.path.join(EXAMPLES_PATH, "examples_index.json")
+                if os.path.exists(examples_index_path):
+                    examples = load_json_file(examples_index_path)
+                    if examples:
+                        st.markdown("#### Design Examples Repository")
+                        st.info(f"Created repository with {len(examples)} design examples")
+                        
+                        # Show category counts
+                        categories = {}
+                        for example in examples:
+                            category = example.get('category')
+                            if category not in categories:
+                                categories[category] = 0
+                            categories[category] += 1
+                        
+                        # Create dataframe
+                        category_df = pd.DataFrame({
+                            'Category': list(categories.keys()),
+                            'Count': list(categories.values())
+                        })
+                        
+                        # Create chart
+                        fig = px.bar(category_df, x='Category', y='Count',
+                                    title='Example Repository by Category',
+                                    labels={'Count': 'Number of Examples', 'Category': 'Category'})
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Display random examples
+                        st.markdown("#### Sample Design Examples")
+                        
+                        # Select random examples (one from each category)
+                        random_examples = []
+                        categories = set(e['category'] for e in examples)
+                        
+                        for category in categories:
+                            category_examples = [e for e in examples if e['category'] == category]
+                            if category_examples:
+                                random_examples.append(random.choice(category_examples))
+                        
+                        # Limit to 3
+                        if len(random_examples) > 3:
+                            random.shuffle(random_examples)
+                            random_examples = random_examples[:3]
+                        
+                        # Display examples
+                        cols = st.columns(len(random_examples))
+                        
+                        for i, example in enumerate(random_examples):
+                            col = cols[i]
+                            
+                            with col:
+                                # Try to find image
+                                if example['category'] == 'highlight':
+                                    highlight = example.get('highlight', '').lower().replace(' ', '_')
+                                    image_path = os.path.join(EXAMPLES_PATH, 'highlights', highlight, f"{example['id']}.jpg")
+                                else:
+                                    image_path = os.path.join(EXAMPLES_PATH, example['category'], f"{example['id']}.jpg")
+                                
+                                if os.path.exists(image_path):
+                                    st.image(image_path, use_column_width=True)
+                                
+                                st.markdown(f"**{example['title']}**")
+                        st.markdown(f"Highlight: {example['highlight']}")
+                        
+                        if example.get('url'):
+                            st.markdown(f"[Visit Website]({example['url']})")
+        else:
+            st.info("No examples found for this highlight")
+    
+    # Gallery tab
+    with tabs[2]:
+        st.markdown("#### Gallery View")
+        
+        # Add filter options
+        filter_options = ['All', 'Godly', 'Library']
+        selected_filter = st.radio("Source Filter", filter_options, horizontal=True)
+        
+        # Filter examples
+        if selected_filter == 'All':
+            filtered_examples = examples
+        else:
+            filtered_examples = [e for e in examples if e.get('source', '').lower() == selected_filter.lower()]
+        
+        # Sort options
+        sort_options = ['Default', 'Title', 'Category']
+        selected_sort = st.selectbox("Sort By", sort_options)
+        
+        # Sort examples
+        if selected_sort == 'Title':
+            filtered_examples = sorted(filtered_examples, key=lambda x: x.get('title', ''))
+        elif selected_sort == 'Category':
+            filtered_examples = sorted(filtered_examples, key=lambda x: (x.get('category', ''), x.get('title', '')))
+        
+        # Display examples in a gallery grid
+        if filtered_examples:
+            st.markdown(f"Found {len(filtered_examples)} examples")
+            
+            # Create a grid layout
+            cols_per_row = 4  # More columns for gallery view
+            rows = [filtered_examples[i:i+cols_per_row] for i in range(0, len(filtered_examples), cols_per_row)]
+            
+            for row in rows:
+                cols = st.columns(cols_per_row)
+                
+                for i, example in enumerate(row):
+                    col = cols[i]
+                    
+                    with col:
+                        # Try to find image
+                        if example.get('category') == 'highlight':
+                            highlight = example.get('highlight', '').lower().replace(' ', '_')
+                            image_path = os.path.join(EXAMPLES_PATH, 'highlights', highlight, f"{example['id']}.jpg")
+                        else:
+                            image_path = os.path.join(EXAMPLES_PATH, example.get('category', ''), f"{example['id']}.jpg")
+                        
+                        if os.path.exists(image_path):
+                            st.image(image_path, use_column_width=True)
+                        
+                        st.markdown(f"**{example.get('title', 'Unnamed')}**")
+                        
+                        tiny_text = f"Source: {example.get('source', 'Unknown')} | "
+                        if example.get('category') == 'highlight':
+                            tiny_text += f"Highlight: {example.get('highlight', 'None')}"
+                        else:
+                            tiny_text += f"Category: {example.get('category', 'None')}"
+                        
+                        st.markdown(f"<span style='font-size:0.8em; color:gray;'>{tiny_text}</span>", unsafe_allow_html=True)
+        else:
+            st.info("No examples found for this filter")
+
+def main():
+    st.sidebar.title("10x Designer AI PRO")
+    st.sidebar.markdown("AI-powered design feedback based on the 10x Designer framework")
+    
+    # Sidebar navigation
+    pages = {
+        "Home": "home",
+        "Upload & Evaluate": "upload",
+        "View Evaluations": "view",
+        "Data Collection": "collect",
+        "Design Analysis": "analyze",
+        "Run Evaluation": "evaluate",
+        "AI Director Integration": "ai_director",
+        "Example Repository": "examples",
+        "About": "about"
+    }
+    
+    selected_page = st.sidebar.radio("Navigation", list(pages.keys()))
+    page = pages[selected_page]
+    
+    # Show AI Director status
+    ai_director_active = os.path.exists(os.path.join(AI_DIRECTOR_PATH, "models", "reference_model.json"))
+    
+    if ai_director_active:
+        st.sidebar.success("✅ AI Creative Director is active")
+    else:
+        st.sidebar.warning("⚠️ AI Creative Director not yet integrated")
+    
+    # Add library stats
+    library_available = os.path.exists(os.path.join(LIBRARY_DATA_PATH, "index.json"))
+    
+    if library_available:
+        try:
+            library_data = load_json_file(os.path.join(LIBRARY_DATA_PATH, "index.json"))
+            if library_data:
+                st.sidebar.markdown(f"📚 Library: {len(library_data)} websites")
+        except:
+            pass
+    
+    # Add example repository stats
+    examples_available = os.path.exists(os.path.join(EXAMPLES_PATH, "examples_index.json"))
+    
+    if examples_available:
+        try:
+            examples_data = load_json_file(os.path.join(EXAMPLES_PATH, "examples_index.json"))
+            if examples_data:
+                st.sidebar.markdown(f"🖼️ Examples: {len(examples_data)} designs")
+        except:
+            pass
+    
+    # Render selected page
+    if page == "home":
+        st.title("10x Designer AI PRO")
+        st.markdown("Welcome to the enhanced AI-powered design feedback tool based on the 10x Designer framework.")
+        
+        # Status dashboard
+        st.markdown("## System Status")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            godly_status = "✅ Available" if os.path.exists(GODLY_DATA_PATH) else "❌ Not Available"
+            st.metric("Godly.Website Data", godly_status)
+        
+        with col2:
+            library_status = "✅ Available" if library_available else "❌ Not Available"
+            st.metric("Website Library", library_status)
+        
+        with col3:
+            ai_director_status = "✅ Active" if ai_director_active else "❌ Not Active"
+            st.metric("AI Creative Director", ai_director_status)
+        
+        st.markdown("""
+        ## What's New in PRO Version
+        
+        - **Website Library Integration**: Import your own collection of great websites
+        - **Enhanced AI Creative Director**: Combines insights from godly.website and your custom library
+        - **Design Example Repository**: Categorized collection of design examples for inspiration
+        - **Advanced Analysis**: More detailed design metrics and visualizations
+        - **Highlight-based Navigation**: Find examples based on specific design highlights
+        
+        ## Getting Started
+        
+        1. **Import Your Website Library** - Go to Data Collection to import your CSV file
+        2. **Analyze Your Library** - Run analysis on both godly.website and your library
+        3. **Integrate AI Creative Director** - Combine both data sources into a powerful AI director
+        4. **Upload Your Designs** - Get feedback based on your enhanced knowledge base
+        """)
+        
+        # Show quick stats if available
+        if ai_director_active:
+            st.markdown("## Current System Metrics")
+            
+            try:
+                model_data = load_json_file(os.path.join(AI_DIRECTOR_PATH, "models", "reference_model.json"))
+                if model_data and 'standards' in model_data:
+                    standards = model_data['standards']
+                    
+                    st.markdown("### Reference Standards")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.markdown("#### Typography")
+                        st.metric("Ideal Size Ratio", f"{standards['typography']['avg_size_ratio']:.1f}")
+                        st.metric("Avg Text Blocks", f"{standards['typography']['avg_text_blocks']:.1f}")
+                        st.metric("Ideal Headings", f"{standards['typography']['avg_headings']:.1f}")
+                    
+                    with col2:
+                        st.markdown("#### Buttons")
+                        st.metric("Touch Friendly %", f"{standards['buttons']['avg_touch_friendly']:.1f}%")
+                        st.metric("Hierarchy Score", f"{standards['buttons']['avg_hierarchy']:.1f}")
+                        st.metric("Ideal Button Count", f"{standards['buttons']['avg_button_count']:.1f}")
+                    
+                    with col3:
+                        st.markdown("#### Brand Character")
+                        st.metric("Color Harmony", f"{standards['brand_character']['avg_harmony']:.1f}")
+                        st.metric("White Space %", f"{standards['brand_character']['avg_white_space']:.1f}%")
+                        st.metric("Golden Ratio", f"{standards['brand_character']['avg_golden_ratio']:.1f}")
+            except:
+                pass
+    
+    elif page == "upload":
+        st.title("Upload & Evaluate")
+        upload_and_evaluate()
+    
+    elif page == "view":
+        st.title("View Evaluations")
+        view_evaluations()
+    
+    elif page == "collect":
+        st.title("Data Collection")
+        run_data_collection()
+    
+    elif page == "analyze":
+        st.title("Design Analysis")
+        run_analysis()
+    
+    elif page == "evaluate":
+        st.title("Run Evaluation")
+        run_evaluation()
+    
+    elif page == "ai_director":
+        st.title("AI Creative Director Integration")
+        run_ai_director()
+    
+    elif page == "examples":
+        st.title("Design Example Repository")
+        view_example_repository()
+    
+    elif page == "about":
+        st.title("About 10x Designer AI PRO")
+        st.markdown("""
+        ## What is a 10x Designer?
+        
+        A 10x Designer masterfully combines creativity, usability, branding, and business strategy. They create modern, timeless masterpieces that elevate brands.
+        
+        ## The Four Thinking Levels
+        
+        1. **Dandelion Thinking** 😵  
+           Following trends blindly without questioning anything.
+        
+        2. **Designer Thinking** 🎨  
+           Caring about aesthetics, but without thinking about usability or business impact.
+        
+        3. **Business Thinking** 💼  
+           Caring about business outcomes but often sacrificing quality and creativity.
+        
+        4. **10x Designer Thinking** 🚀  
+           Combining creativity, usability, branding, and business strategy masterfully.
+        
+        ## How It Works
+        
+        This enhanced tool analyzes your design across three key categories:
+        
+        1. **Typography & Readability**: Font choices, hierarchy, and readability
+        2. **Buttons & Interactions**: Button design, usability, and conversion potential
+        3. **Brand Character**: Uniqueness, emotional impact, and brand alignment
+        
+        Each category is evaluated based on the 10x Designer framework to determine your current thinking level and provide actionable improvements.
+        
+        ## About Your Website Library
+        
+        The PRO version allows you to import your own collection of great websites, combining the insights from both godly.website and your personal library to create a more powerful and customized AI Creative Director.
+        
+        **Supported Formats:**
+        - CSV file with columns for website information
+        - Required columns: Name, Website URL, Highlights/Tags
+        """)
+
+if __name__ == "__main__":
+    main()
+")
+                                st.markdown(f"Category: {example['category'].title()}")
+                                
+                                if example.get('highlight'):
+                                    st.markdown(f"Highlight: {example['highlight']}")
+                                
+                                if example.get('url'):
+                                    st.markdown(f"[Visit Website]({example['url']})")
+            else:
+                st.error("AI Creative Director integration failed.")
+
+def view_evaluations():
+    """View existing evaluations"""
+    st.markdown("### View Evaluations")
+    
+    # Check if evaluations exist
+    if not os.path.exists(EVALUATION_PATH):
+        st.warning("No evaluations found. Please run the evaluation process first.")
+        return
+    
+    # Find evaluation files
+    eval_files = [f for f in os.listdir(EVALUATION_PATH) if f.endswith('_evaluation.json') and not f.startswith('evaluation_index')]
+    
+    if not eval_files:
+        st.warning("No evaluation files found. Please run the evaluation process first.")
+        return
+    
+    # List evaluations
+    st.info(f"Found {len(eval_files)} evaluations")
+    
+    # Check for aggregate report
+    aggregate_path = os.path.join(EVALUATION_PATH, "aggregate_evaluation_report.json")
+    if os.path.exists(aggregate_path):
+        if st.button("View Aggregate Report"):
+            display_aggregate_report()
+    
+    # Create a selectbox to choose an evaluation
+    selected_file = st.selectbox("Select Evaluation", eval_files)
+    
+    if selected_file:
+        eval_path = os.path.join(EVALUATION_PATH, selected_file)
+        evaluation = load_json_file(eval_path)
+        
+        if evaluation:
+            display_evaluation(evaluation)
+        else:
+            st.error("Failed to load evaluation data.")
+
+def view_example_repository():
+    """View AI Creative Director example repository"""
+    st.markdown("### Design Example Repository")
+    
+    # Check if examples exist
+    examples_index_path = os.path.join(EXAMPLES_PATH, "examples_index.json")
+    if not os.path.exists(examples_index_path):
+        st.warning("No example repository found. Please run the AI Creative Director integration first.")
+        return
+    
+    examples = load_json_file(examples_index_path)
+    if not examples:
+        st.warning("Empty example repository. Please run the AI Creative Director integration first.")
+        return
+    
+    st.info(f"Found {len(examples)} design examples")
+    
+    # Create tabs for different views
+    tabs = st.tabs(["Categories", "Highlights", "Gallery"])
+    
+    # Categories tab
+    with tabs[0]:
+        st.markdown("#### Browse by Category")
+        
+        # Get unique categories
+        categories = set(e.get('category') for e in examples if e.get('category') != 'highlight')
+        
+        # Add "All Categories" option
+        category_options = ["All Categories"] + sorted(categories)
+        
+        selected_category = st.selectbox("Select Category", category_options)
+        
+        # Filter examples
+        if selected_category == "All Categories":
+            filtered_examples = [e for e in examples if e.get('category') != 'highlight']
+        else:
+            filtered_examples = [e for e in examples if e.get('category') == selected_category]
+        
+        # Display examples
+        if filtered_examples:
+            st.markdown(f"Found {len(filtered_examples)} examples")
+            
+            # Create a grid layout
+            cols_per_row = 3
+            rows = [filtered_examples[i:i+cols_per_row] for i in range(0, len(filtered_examples), cols_per_row)]
+            
+            for row in rows:
+                cols = st.columns(cols_per_row)
+                
+                for i, example in enumerate(row):
+                    col = cols[i]
+                    
+                    with col:
+                        # Try to find image
+                        image_path = os.path.join(EXAMPLES_PATH, example.get('category', ''), f"{example['id']}.jpg")
+                        
+                        if os.path.exists(image_path):
+                            st.image(image_path, use_column_width=True)
+                        
+                        st.markdown(f"**{example['title']}**")
+                        
+                        if example.get('score'):
+                            st.markdown(f"Score: {example['score']:.1f}")
+                        
+                        if example.get('url'):
+                            st.markdown(f"[Visit Website]({example['url']})")
+        else:
+            st.info("No examples found for this category")
+    
+    # Highlights tab
+    with tabs[1]:
+        st.markdown("#### Browse by Design Highlight")
+        
+        # Get unique highlights
+        highlights = set()
+        for example in examples:
+            if example.get('category') == 'highlight' and example.get('highlight'):
+                highlights.add(example['highlight'])
+        
+        # Add "All Highlights" option
+        highlight_options = ["All Highlights"] + sorted(highlights)
+        
+        selected_highlight = st.selectbox("Select Highlight", highlight_options)
+        
+        # Filter examples
+        if selected_highlight == "All Highlights":
+            filtered_examples = [e for e in examples if e.get('category') == 'highlight']
+        else:
+            filtered_examples = [e for e in examples if e.get('category') == 'highlight' and e.get('highlight') == selected_highlight]
+        
+        # Display examples
+        if filtered_examples:
+            st.markdown(f"Found {len(filtered_examples)} examples")
+            
+            # Create a grid layout
+            cols_per_row = 3
+            rows = [filtered_examples[i:i+cols_per_row] for i in range(0, len(filtered_examples), cols_per_row)]
+            
+            for row in rows:
+                cols = st.columns(cols_per_row)
+                
+                for i, example in enumerate(row):
+                    col = cols[i]
+                    
+                    with col:
+                        # Try to find image
+                        highlight = example.get('highlight', '').lower().replace(' ', '_')
+                        image_path = os.path.join(EXAMPLES_PATH, 'highlights', highlight, f"{example['id']}.jpg")
+                        
+                        if os.path.exists(image_path):
+                            st.image(image_path, use_column_width=True)
+                        
+                        st.markdown(f"**{example['title']}**import streamlit as st
+import os
+import sys
+import json
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+from PIL import Image
+from datetime import datetime
+import subprocess
+import time
+import glob
+import requests
+from urllib.parse import urlparse
+import uuid
+import random
+import plotly.express as px
+import plotly.graph_objects as go
+
+# Add parent directory to path for imports
+sys.path.append('..')
+
+# Set up page configuration
+st.set_page_config(
+    page_title="AI Creative Director PRO",
+    page_icon="🎨",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Define paths
+BASE_PATH = ".."
+CONFIG_PATH = os.path.join(BASE_PATH, "config")
+DATA_PATH = os.path.join(BASE_PATH, "data")
+GODLY_DATA_PATH = os.path.join(DATA_PATH, "raw", "godly")
+LIBRARY_DATA_PATH = os.path.join(DATA_PATH, "library")
+ANALYSIS_PATH = os.path.join(BASE_PATH, "analysis")
+GODLY_ANALYSIS_PATH = os.path.join(ANALYSIS_PATH)
+LIBRARY_ANALYSIS_PATH = os.path.join(ANALYSIS_PATH, "library")
+EVALUATION_PATH = os.path.join(BASE_PATH, "evaluations")
+SCRIPTS_PATH = os.path.join(BASE_PATH, "scripts")
+AI_DIRECTOR_PATH = os.path.join(BASE_PATH, "ai_director")
+EXAMPLES_PATH = os.path.join(AI_DIRECTOR_PATH, "examples")
+
+# Create directories if they don't exist
+for path in [DATA_PATH, GODLY_DATA_PATH, LIBRARY_DATA_PATH, ANALYSIS_PATH,
+             GODLY_ANALYSIS_PATH, LIBRARY_ANALYSIS_PATH, EVALUATION_PATH,
+             AI_DIRECTOR_PATH, EXAMPLES_PATH, CONFIG_PATH]:
+    os.makedirs(path, exist_ok=True)
+
+def load_json_file(filepath):
+    """Load JSON file"""
+    try:
+        with open(filepath, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        st.error(f"Error loading file: {e}")
+        return None
+
+def run_script(script_path, args=None):
+    """Run a Python script and capture output"""
+    cmd = [sys.executable, script_path]
+    if args:
+        cmd.extend(args)
+    
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+    
+    # Create a placeholder for real-time output
+    output_placeholder = st.empty()
+    
+    # Display output in real-time
+    output = ""
+    while True:
+        output_line = process.stdout.readline()
+        if output_line == '' and process.poll() is not None:
+            break
+        if output_line:
+            output += output_line
+            output_placeholder.text_area("Output:", output, height=200)
+    
+    # Get any remaining output
+    remaining_output, errors = process.communicate()
+    output += remaining_output
+    output_placeholder.text_area("Output:", output, height=200)
+    
+    if errors:
+        st.error(f"Errors: {errors}")
+    
+    return process.returncode
+
+def display_color_palette(colors):
+    """Display a color palette"""
+    if not colors:
+        st.info("No color data available")
+        return
+    
+    # Create a horizontal color display
+    cols = st.columns(len(colors))
+    for i, color in enumerate(colors):
+        hex_color = color.get('hex', '#FFFFFF')
+        percentage = color.get('percentage', 0)
+        cols[i].markdown(
+            f'<div style="background-color: {hex_color}; height: 50px; border-radius: 5px;"></div>'
+            f'<div style="text-align: center;">{hex_color}<br>{percentage:.1f}%</div>',
+            unsafe_allow_html=True
+        )
+
+def display_evaluation(evaluation):
+    """Display a design evaluation"""
+    if not evaluation:
+        st.error("No evaluation data to display")
+        return
+    
+    # Extract key information
+    overall = evaluation['overall']
+    level = overall['level']
+    level_name = overall['level_name']
+    score = overall['score']
+    
+    # Header section
+    st.title(f"Design Evaluation: {evaluation.get('title', 'Unnamed Design')}")
+    st.markdown(f"### Level: {level_name} Thinking (Score: {score}/100)")
+    
+    # Display image if available
+    design_id = evaluation.get('design_id', '')
+    image_path = os.path.join(ANALYSIS_PATH, f"{design_id}.png")
+    if not os.path.exists(image_path):
+        image_path = os.path.join(ANALYSIS_PATH, f"{design_id}.jpg")
+    
+    if os.path.exists(image_path):
+        st.image(image_path, caption="Evaluated Design", use_column_width=True)
+    
+    # Strengths and Improvements
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### Strengths")
+        for strength in overall['strengths']:
+            st.markdown(f"✅ {strength}")
+    
+    with col2:
+        st.markdown("### Areas for Improvement")
+        for improvement in overall['improvements']:
+            st.markdown(f"💡 {improvement}")
+    
+    # Category breakdown
+    st.markdown("## Category Analysis")
+    tabs = st.tabs(["Typography", "Buttons", "Brand Character"])
+    
+    # Typography tab
+    with tabs[0]:
+        typo = evaluation['categories']['typography']
+        st.markdown(f"### Typography: {evaluation['category_scores']['typography']}/100")
+        st.markdown(f"**Level: {typo['level_name']} Thinking**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Typography Checklist")
+            checklist = typo.get('checklist_results', {})
+            for item, result in checklist.items():
+                if result is True:
+                    st.markdown(f"✅ {item}")
+                elif result is False:
+                    st.markdown(f"❌ {item}")
+                else:
+                    st.markdown(f"⚠️ {item} (Cannot determine)")
+        
+        with col2:
+            st.markdown("#### Typography Feedback")
+            for strength in typo['strengths']:
+                st.markdown(f"✅ {strength}")
+            
+            for improvement in typo['improvements']:
+                st.markdown(f"💡 {improvement}")
+            
+        # Show similar examples
+        st.markdown("#### Similar Great Examples")
+        display_similar_examples("typography", evaluation['category_scores']['typography'])
+    
+    # Buttons tab
+    with tabs[1]:
+        buttons = evaluation['categories']['buttons']
+        st.markdown(f"### Buttons & Interactions: {evaluation['category_scores']['buttons']}/100")
+        st.markdown(f"**Level: {buttons['level_name']} Thinking**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Button Checklist")
+            checklist = buttons.get('checklist_results', {})
+            for item, result in checklist.items():
+                if result is True:
+                    st.markdown(f"✅ {item}")
+                elif result is False:
+                    st.markdown(f"❌ {item}")
+                else:
+                    st.markdown(f"⚠️ {item} (Cannot determine)")
+        
+        with col2:
+            st.markdown("#### Button Feedback")
+            for strength in buttons['strengths']:
+                st.markdown(f"✅ {strength}")
+            
+            for improvement in buttons['improvements']:
+                st.markdown(f"💡 {improvement}")
+        
+        # Show similar examples
+        st.markdown("#### Similar Great Examples")
+        display_similar_examples("buttons", evaluation['category_scores']['buttons'])
+    
+    # Brand Character tab
+    with tabs[2]:
+        brand = evaluation['categories']['brand_character']
+        st.markdown(f"### Brand Character: {evaluation['category_scores']['brand_character']}/100")
+        st.markdown(f"**Level: {brand['level_name']} Thinking**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Brand Character Checklist")
+            checklist = brand.get('checklist_results', {})
+            for item, result in checklist.items():
+                if result is True:
+                    st.markdown(f"✅ {item}")
+                elif result is False:
+                    st.markdown(f"❌ {item}")
+                else:
+                    st.markdown(f"⚠️ {item} (Cannot determine)")
+        
+        with col2:
+            st.markdown("#### Brand Character Feedback")
+            for strength in brand['strengths']:
+                st.markdown(f"✅ {strength}")
+            
+            for improvement in brand['improvements']:
+                st.markdown(f"💡 {improvement}")
+        
+        # Show similar examples
+        st.markdown("#### Similar Great Examples")
+        display_similar_examples("brand_character", evaluation['category_scores']['brand_character'])
+    
+    # Next steps
+    st.markdown("---")
+    st.markdown("### Next Steps to Improve")
+    
+    # Determine which level to target next
+    next_level = min(level + 1, 4)
+    next_level_name = buttons['level_name']  # We already have this loaded
+    
+    if next_level == 4:
+        st.markdown(f"Your design is approaching 10x Designer level. Focus on these key improvements:")
+    else:
+        st.markdown(f"To reach {next_level_name} Thinking level, focus on these key improvements:")
+    
+    # List top 3 improvements
+    improvements = overall['improvements']
+    if improvements:
+        for i, improvement in enumerate(improvements[:3]):
+            st.markdown(f"{i+1}. {improvement}")
+
+def display_similar_examples(category, score):
+    """Display similar examples from the AI Creative Director repository"""
+    # Try to load examples index
+    examples_index_path = os.path.join(EXAMPLES_PATH, "examples_index.json")
+    
+    if not os.path.exists(examples_index_path):
+        st.info("No examples available. Please run the AI Creative Director integration first.")
+        return
+    
+    try:
+        with open(examples_index_path, 'r') as f:
+            examples = json.load(f)
+        
+        # Filter by category
+        category_examples = [e for e in examples if e.get('category') == category]
+        
+        if not category_examples:
+            st.info(f"No examples available for {category}.")
+            return
+        
+        # Display examples
+        cols = st.columns(min(3, len(category_examples)))
+        
+        for i, example in enumerate(category_examples[:3]):  # Show up to 3 examples
+            col = cols[i]
+            
+            # Try to find the image
+            image_path = os.path.join(EXAMPLES_PATH, category, f"{example['id']}.jpg")
+            if not os.path.exists(image_path):
+                image_path = os.path.join(EXAMPLES_PATH, category, f"{example['id']}.png")
+            
+            with col:
+                if os.path.exists(image_path):
+                    st.image(image_path, caption=example['title'], use_column_width=True)
+                
+                st.markdown(f"**{example['title']}**")
+                st.markdown(f"Score: {example.get('score', 'N/A')}")
+                
+                if example.get('url'):
+                    st.markdown(f"[Visit Website]({example['url']})")
+    
+    except Exception as e:
+        st.error(f"Error displaying examples: {e}")
+
+def display_aggregate_report():
+    """Display aggregate evaluation report"""
+    report_path = os.path.join(EVALUATION_PATH, "aggregate_evaluation_report.json")
+    viz_path = os.path.join(EVALUATION_PATH, "aggregate_evaluation_viz.png")
+    
+    if not os.path.exists(report_path):
+        st.warning("No aggregate report found. Please run evaluations first.")
+        return
+    
+    report = load_json_file(report_path)
+    if not report:
+        return
+    
+    st.title("Aggregate Evaluation Report")
+    st.markdown(f"### Overview of {report['total_evaluations']} Design Evaluations")
+    
+    # Display visualization if available
+    if os.path.exists(viz_path):
+        st.image(viz_path, use_column_width=True)
+    
+    # Display key metrics
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Average Score", f"{report['average_scores']['overall']}/100")
+    
+    with col2:
+        # Find most common level
+        levels = report['level_distribution']['counts']
+        most_common = max(levels, key=lambda k: levels[k])
+        level_name = {1: "Dandelion", 2: "Designer", 3: "Business", 4: "10x Designer"}[int(most_common)]
+        st.metric("Most Common Level", level_name)
+    
+    with col3:
+        st.metric("Strongest Category", report['strongest_category'].title())
+    
+    # Display category breakdown
+    st.markdown("### Category Averages")
+    categories = report['average_scores']['categories']
+    category_df = pd.DataFrame({
+        'Category': list(categories.keys()),
+        'Score': list(categories.values())
+    })
+    
+    # Create interactive bar chart with Plotly
+    fig = px.bar(category_df, x='Category', y='Score', 
+                 title='Average Category Scores',
+                 labels={'Score': 'Score (0-100)', 'Category': 'Design Category'},
+                 color='Score', color_continuous_scale='Viridis')
+    
+    fig.update_layout(
+        xaxis_title="Category",
+        yaxis_title="Score",
+        yaxis_range=[0, 100]
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Display level distribution
+    st.markdown("### Thinking Level Distribution")
+    level_counts = report['level_distribution']['counts']
+    level_pcts = report['level_distribution']['percentages']
+    
+    level_df = pd.DataFrame({
+        'Level': ["Dandelion", "Designer", "Business", "10x Designer"],
+        'Count': [level_counts[str(i)] for i in range(1, 5)],
+        'Percentage': [level_pcts[str(i)] for i in range(1, 5)]
+    })
+    
+    # Create interactive pie chart with Plotly
+    fig = px.pie(level_df, values='Count', names='Level', 
+                 title='Design Thinking Level Distribution',
+                 color='Level', 
+                 color_discrete_map={'Dandelion': '#ef4444', 
+                                     'Designer': '#f59e0b', 
+                                     'Business': '#10b981', 
+                                     '10x Designer': '#3b82f6'})
+    
+    fig.update_traces(textposition='inside', textinfo='percent+label')
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Display recommendations
+    st.markdown("### Improvement Recommendations")
+    
+    weakest_category = report['weakest_category']
+    recommendations = {
+        'typography': [
+            "Establish clearer typographic hierarchy between headings and body text",
+            "Ensure consistent font usage across the design",
+            "Optimize font sizes for better readability (minimum 12px for body text)"
+        ],
+        'buttons': [
+            "Increase button size to be more touch-friendly (minimum 44-48px)",
+            "Create clear visual hierarchy between primary and secondary actions",
+            "Ensure buttons have clear affordance (make it obvious they're clickable)"
+        ],
+        'brand_character': [
+            "Develop more distinctive color palettes to enhance brand identity",
+            "Improve color harmony for stronger emotional impact",
+            "Create memorable 'wow moments' to engage users emotionally"
+        ]
+    }
+    
+    st.markdown(f"#### Focus on Improving: {weakest_category.title()}")
+    
+    for rec in recommendations.get(weakest_category, []):
+        st.markdown(f"💡 {rec}")
+
+def upload_and_evaluate():
+    """Upload and evaluate a design"""
+    st.markdown("### Upload Design for Evaluation")
+    
+    upload_method = st.radio("Upload Method", ["Upload Image", "Provide URL"])
+    
+    if upload_method == "Upload Image":
+        uploaded_file = st.file_uploader("Upload a design to evaluate", type=['jpg', 'jpeg', 'png'])
+        
+        if uploaded_file is not None:
+            # Create a temporary file to save the uploaded image
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            temp_id = f"upload_{timestamp}"
+            temp_path = os.path.join(DATA_PATH, f"{temp_id}.jpg")
+            
+            with open(temp_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            
+            st.image(temp_path, caption="Uploaded Design", use_column_width=True)
+            process_design(temp_id, temp_path)
+    
+    else:  # Provide URL
+        website_url = st.text_input("Enter Website URL")
+        
+        if website_url and st.button("Capture Website"):
+            if not (website_url.startswith('http://') or website_url.startswith('https://')):
+                website_url = 'https://' + website_url
+            
+            st.info(f"Capturing screenshot of {website_url}...")
+            
+            try:
+                # Generate ID from URL
+                domain = urlparse(website_url).netloc
+                timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                temp_id = f"{domain.replace('.', '_')}_{timestamp}"
+                temp_path = os.path.join(DATA_PATH, f"{temp_id}.jpg")
+                
+                # In a production system, you'd use:
+                # - Screenshot API
+                # - Selenium/Playwright
+                # - Headless Chrome via Puppeteer
+                # For this prototype, we'll use a placeholder
+                
+                st.warning("Using a placeholder image. In production, this would capture the actual website.")
+                
+                # Create a placeholder image
+                img = Image.new('RGB', (1200, 800), color='white')
+                d = ImageDraw.Draw(img)
+                d.text((600, 400), website_url, fill=(0, 0, 0))
+                img.save(temp_path)
+                
+                st.image(temp_path, caption=f"Screenshot of {website_url}", use_column_width=True)
+                process_design(temp_id, temp_path, website_url=website_url)
+                
+            except Exception as e:
+                st.error(f"Error capturing website: {e}")
+
+def process_design(design_id, image_path, website_url=None):
+    """Process a design for evaluation"""
+    # Add metadata
+    if not website_url:
+        website_url = st.text_input("Website URL (optional)")
+    
+    design_title = st.text_input("Design Title (optional)", value="Uploaded Design")
+    tags_input = st.text_input("Tags (comma-separated, optional)")
+    tags = [tag.strip() for tag in tags_input.split(',')] if tags_input else []
+    
+    # Create metadata file
+    metadata = {
+        "id": design_id,
+        "title": design_title,
+        "website_url": website_url,
+        "tags": tags,
+        "screenshot": f"{design_id}.jpg",
+        "captured_at": datetime.now().isoformat()
+    }
+    
+    metadata_path = os.path.join(DATA_PATH, f"{design_id}.json")
+    with open(metadata_path, 'w') as f:
+        json.dump(metadata, f, indent=2)
+    
+    # Run button
+    if st.button("Run 10x Designer Evaluation"):
+        with st.spinner
