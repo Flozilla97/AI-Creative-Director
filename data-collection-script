@@ -1,0 +1,281 @@
+#!/usr/bin/env python3
+"""
+Data Collection Script for AI Creative Director
+Scrapes godly.website for reference designs
+"""
+
+import json
+import os
+import sys
+import time
+import logging
+import argparse
+import requests
+import uuid
+from datetime import datetime
+from tqdm import tqdm
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
+import re
+
+# Set up argument parser
+parser = argparse.ArgumentParser(description='Scrape godly.website for reference designs')
+parser.add_argument('--config', type=str, default='config/scraper_config.json', help='Path to scraper config file')
+parser.add_argument('--pages', type=int, help='Override number of pages to scrape')
+parser.add_argument('--sites', type=int, help='Override maximum number of sites to scrape')
+parser.add_argument('--delay', type=float, help='Override delay between requests')
+args = parser.parse_args()
+
+# Load configuration
+try:
+    with open(args.config, 'r') as f:
+        config = json.load(f)
+except Exception as e:
+    print(f"Error loading configuration: {e}")
+    sys.exit(1)
+
+# Override config with command line arguments if provided
+if args.pages:
+    config['max_pages'] = args.pages
+if args.sites:
+    config['max_sites'] = args.sites
+if args.delay:
+    config['delay_seconds'] = args.delay
+
+# Create directories if they don't exist
+os.makedirs(config['output_directory'], exist_ok=True)
+os.makedirs(config['screenshots_directory'], exist_ok=True)
+os.makedirs(config['metadata_directory'], exist_ok=True)
+os.makedirs(os.path.dirname(config['log_file']), exist_ok=True)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(config['log_file']),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("GodlyScraper")
+
+class GodlyWebsiteScraper:
+    def __init__(self, config):
+        self.config = config
+        self.base_url = config['url']
+        self.output_dir = config['output_directory']
+        self.screenshots_dir = config['screenshots_directory']
+        self.metadata_dir = config['metadata_directory']
+        
+        # Initialize WebDriver
+        logger.info("Initializing WebDriver...")
+        self._setup_webdriver()
+    
+    def _setup_webdriver(self):
+        """Set up Chrome WebDriver"""
+        browser_config = self.config['browser_settings']
+        
+        chrome_options = Options()
+        if browser_config['headless']:
+            chrome_options.add_argument("--headless")
+        
+        chrome_options.add_argument(f"--window-size={browser_config['window_width']},{browser_config['window_height']}")
+        chrome_options.add_argument(f"user-agent={browser_config['user_agent']}")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--no-sandbox")
+        
+        # Set up Chrome driver
+        service = Service(ChromeDriverManager().install())
+        self.driver = webdriver.Chrome(service=service, options=chrome_options)
+    
+    def get_website_list(self):
+        """Get a list of websites featured on godly.website"""
+        websites = []
+        
+        max_pages = self.config['max_pages']
+        logger.info(f"Scraping up to {max_pages} pages of websites...")
+        
+        for page in tqdm(range(1, max_pages + 1), desc="Collecting website URLs"):
+            url = f"{self.base_url}/page/{page}" if page > 1 else self.base_url
+            logger.info(f"Scraping website list from {url}")
+            
+            try:
+                response = requests.get(url)
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Find all website cards using configured selector
+                website_cards = soup.select(self.config['selectors']['website_cards'])
+                
+                if not website_cards:
+                    logger.warning(f"No website cards found on page {page}. Stopping pagination.")
+                    break
+                
+                for card in website_cards:
+                    try:
+                        site_link = card.select_one(self.config['selectors']['website_link'])['href']
+                        site_url = f"{self.base_url}{site_link}"
+                        websites.append(site_url)
+                    except Exception as e:
+                        logger.error(f"Error extracting site URL: {e}")
+            
+            except Exception as e:
+                logger.error(f"Error fetching website list page {page}: {e}")
+                continue
+                
+            # Be nice to the server
+            time.sleep(self.config['delay_seconds'])
+        
+        logger.info(f"Found {len(websites)} websites to scrape")
+        
+        # Limit to max_sites if specified
+        if len(websites) > self.config['max_sites']:
+            websites = websites[:self.config['max_sites']]
+            logger.info(f"Limiting to {len(websites)} websites as per configuration")
+        
+        return websites
+    
+    def extract_website_data(self, url):
+        """Extract data for a single website from its godly.website page"""
+        logger.info(f"Extracting data from {url}")
+        website_id = str(uuid.uuid4())
+        
+        try:
+            self.driver.get(url)
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, self.config['selectors']['website_preview']))
+            )
+            
+            # Extract basic info
+            title = self.driver.find_element(By.CSS_SELECTOR, self.config['selectors']['website_title']).text
+            
+            # Get the actual website URL
+            actual_url_element = self.driver.find_element(By.CSS_SELECTOR, self.config['selectors']['website_url'])
+            actual_url = actual_url_element.get_attribute("href")
+            
+            # Extract tags
+            tags = []
+            try:
+                tag_elements = self.driver.find_elements(By.CSS_SELECTOR, self.config['selectors']['website_tags'])
+                tags = [tag.text for tag in tag_elements]
+            except:
+                logger.warning(f"Could not extract tags for {url}")
+            
+            # Get screenshot of the featured website preview
+            screenshot_path = os.path.join(self.screenshots_dir, f"{website_id}.png")
+            
+            try:
+                preview_element = self.driver.find_element(By.CSS_SELECTOR, self.config['selectors']['website_preview'])
+                preview_element.screenshot(screenshot_path)
+                logger.info(f"Saved screenshot to {screenshot_path}")
+            except Exception as e:
+                logger.error(f"Error taking screenshot: {e}")
+            
+            # Extract colors if available
+            colors = []
+            try:
+                color_elements = self.driver.find_elements(By.CSS_SELECTOR, self.config['selectors']['color_list'])
+                for color_el in color_elements:
+                    # Get color from background-color style or data attribute
+                    bg_color = color_el.value_of_css_property("background-color")
+                    if bg_color and bg_color != "rgba(0, 0, 0, 0)":
+                        # Convert rgba to hex
+                        colors.append(self._rgba_to_hex(bg_color))
+            except Exception as e:
+                logger.error(f"Error extracting colors: {e}")
+            
+            # Create data structure
+            website_data = {
+                "id": website_id,
+                "title": title,
+                "godly_url": url,
+                "website_url": actual_url,
+                "tags": tags,
+                "colors": colors,
+                "screenshot": f"{website_id}.png",
+                "captured_at": datetime.now().isoformat()
+            }
+            
+            # Save data to JSON file
+            data_path = os.path.join(self.metadata_dir, f"{website_id}.json")
+            with open(data_path, 'w') as f:
+                json.dump(website_data, f, indent=2)
+            
+            logger.info(f"Successfully extracted data for {title}")
+            return website_data
+            
+        except Exception as e:
+            logger.error(f"Error extracting website data from {url}: {e}")
+            return None
+    
+    def _rgba_to_hex(self, rgba_color):
+        """Convert rgba color to hex"""
+        rgba = re.search(r'rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*(\d+(?:\.\d+)?))?\)', rgba_color)
+        if rgba:
+            r, g, b = rgba.groups()[:3]
+            r, g, b = int(r), int(g), int(b)
+            return f"#{r:02x}{g:02x}{b:02x}"
+        return "#000000"  # Default fallback
+    
+    def run(self):
+        """Run the scraper to collect data from godly.website"""
+        logger.info(f"Starting to scrape godly.website")
+        
+        # Get list of websites
+        websites = self.get_website_list()
+        
+        # Extract data for each website
+        results = []
+        for i, url in enumerate(tqdm(websites, desc="Scraping websites")):
+            logger.info(f"Processing site {i+1}/{len(websites)}: {url}")
+            data = self.extract_website_data(url)
+            if data:
+                results.append(data)
+            
+            # Be nice to the server
+            time.sleep(self.config['delay_seconds'])
+        
+        # Create an index file
+        index_path = os.path.join(self.output_dir, "index.json")
+        with open(index_path, 'w') as f:
+            json.dump(results, f, indent=2)
+        
+        logger.info(f"Scraping complete. Collected data for {len(results)} websites")
+        
+        # Close the browser
+        self.driver.quit()
+        
+        return results
+    
+    def cleanup(self):
+        """Clean up resources"""
+        try:
+            self.driver.quit()
+            logger.info("WebDriver closed")
+        except:
+            pass
+
+def main():
+    try:
+        logger.info("Starting godly.website scraper")
+        scraper = GodlyWebsiteScraper(config)
+        results = scraper.run()
+        logger.info(f"Successfully scraped {len(results)} websites")
+        return 0
+    except KeyboardInterrupt:
+        logger.info("Scraping interrupted by user")
+        return 1
+    except Exception as e:
+        logger.error(f"Scraping failed with error: {e}")
+        return 1
+    finally:
+        if 'scraper' in locals():
+            scraper.cleanup()
+
+if __name__ == "__main__":
+    sys.exit(main())
