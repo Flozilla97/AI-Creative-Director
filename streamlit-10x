@@ -1,0 +1,734 @@
+import streamlit as st
+import os
+import sys
+import json
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+from PIL import Image
+from datetime import datetime
+import subprocess
+import time
+
+# Add parent directory to path for imports
+sys.path.append('..')
+
+# Set up page configuration
+st.set_page_config(
+    page_title="10x Designer AI",
+    page_icon="🎨",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Define paths
+BASE_PATH = ".."
+CONFIG_PATH = os.path.join(BASE_PATH, "config")
+DATA_PATH = os.path.join(BASE_PATH, "data")
+ANALYSIS_PATH = os.path.join(BASE_PATH, "analysis")
+EVALUATION_PATH = os.path.join(BASE_PATH, "evaluations")
+SCRIPTS_PATH = os.path.join(BASE_PATH, "scripts")
+
+# Create directories if they don't exist
+os.makedirs(DATA_PATH, exist_ok=True)
+os.makedirs(ANALYSIS_PATH, exist_ok=True)
+os.makedirs(EVALUATION_PATH, exist_ok=True)
+
+def load_json_file(filepath):
+    """Load JSON file"""
+    try:
+        with open(filepath, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        st.error(f"Error loading file: {e}")
+        return None
+
+def run_script(script_path, args=None):
+    """Run a Python script and capture output"""
+    cmd = [sys.executable, script_path]
+    if args:
+        cmd.extend(args)
+    
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+    
+    # Create a placeholder for real-time output
+    output_placeholder = st.empty()
+    
+    # Display output in real-time
+    output = ""
+    while True:
+        output_line = process.stdout.readline()
+        if output_line == '' and process.poll() is not None:
+            break
+        if output_line:
+            output += output_line
+            output_placeholder.text_area("Output:", output, height=200)
+    
+    # Get any remaining output
+    remaining_output, errors = process.communicate()
+    output += remaining_output
+    output_placeholder.text_area("Output:", output, height=200)
+    
+    if errors:
+        st.error(f"Errors: {errors}")
+    
+    return process.returncode
+
+def display_color_palette(colors):
+    """Display a color palette"""
+    if not colors:
+        st.info("No color data available")
+        return
+    
+    # Create a horizontal color display
+    cols = st.columns(len(colors))
+    for i, color in enumerate(colors):
+        hex_color = color.get('hex', '#FFFFFF')
+        percentage = color.get('percentage', 0)
+        cols[i].markdown(
+            f'<div style="background-color: {hex_color}; height: 50px; border-radius: 5px;"></div>'
+            f'<div style="text-align: center;">{hex_color}<br>{percentage:.1f}%</div>',
+            unsafe_allow_html=True
+        )
+
+def display_evaluation(evaluation):
+    """Display a design evaluation"""
+    if not evaluation:
+        st.error("No evaluation data to display")
+        return
+    
+    # Extract key information
+    overall = evaluation['overall']
+    level = overall['level']
+    level_name = overall['level_name']
+    score = overall['score']
+    
+    # Header section
+    st.title(f"Design Evaluation: {evaluation.get('title', 'Unnamed Design')}")
+    st.markdown(f"### Level: {level_name} Thinking (Score: {score}/100)")
+    
+    # Display image if available
+    design_id = evaluation.get('design_id', '')
+    image_path = os.path.join(ANALYSIS_PATH, f"{design_id}.png")
+    if os.path.exists(image_path):
+        st.image(image_path, caption="Evaluated Design", use_column_width=True)
+    
+    # Strengths and Improvements
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### Strengths")
+        for strength in overall['strengths']:
+            st.markdown(f"✅ {strength}")
+    
+    with col2:
+        st.markdown("### Areas for Improvement")
+        for improvement in overall['improvements']:
+            st.markdown(f"💡 {improvement}")
+    
+    # Category breakdown
+    st.markdown("## Category Analysis")
+    tabs = st.tabs(["Typography", "Buttons", "Brand Character"])
+    
+    # Typography tab
+    with tabs[0]:
+        typo = evaluation['categories']['typography']
+        st.markdown(f"### Typography: {evaluation['category_scores']['typography']}/100")
+        st.markdown(f"**Level: {typo['level_name']} Thinking**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Typography Checklist")
+            checklist = typo.get('checklist_results', {})
+            for item, result in checklist.items():
+                if result is True:
+                    st.markdown(f"✅ {item}")
+                elif result is False:
+                    st.markdown(f"❌ {item}")
+                else:
+                    st.markdown(f"⚠️ {item} (Cannot determine)")
+        
+        with col2:
+            st.markdown("#### Typography Feedback")
+            for strength in typo['strengths']:
+                st.markdown(f"✅ {strength}")
+            
+            for improvement in typo['improvements']:
+                st.markdown(f"💡 {improvement}")
+    
+    # Buttons tab
+    with tabs[1]:
+        buttons = evaluation['categories']['buttons']
+        st.markdown(f"### Buttons & Interactions: {evaluation['category_scores']['buttons']}/100")
+        st.markdown(f"**Level: {buttons['level_name']} Thinking**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Button Checklist")
+            checklist = buttons.get('checklist_results', {})
+            for item, result in checklist.items():
+                if result is True:
+                    st.markdown(f"✅ {item}")
+                elif result is False:
+                    st.markdown(f"❌ {item}")
+                else:
+                    st.markdown(f"⚠️ {item} (Cannot determine)")
+        
+        with col2:
+            st.markdown("#### Button Feedback")
+            for strength in buttons['strengths']:
+                st.markdown(f"✅ {strength}")
+            
+            for improvement in buttons['improvements']:
+                st.markdown(f"💡 {improvement}")
+    
+    # Brand Character tab
+    with tabs[2]:
+        brand = evaluation['categories']['brand_character']
+        st.markdown(f"### Brand Character: {evaluation['category_scores']['brand_character']}/100")
+        st.markdown(f"**Level: {brand['level_name']} Thinking**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### Brand Character Checklist")
+            checklist = brand.get('checklist_results', {})
+            for item, result in checklist.items():
+                if result is True:
+                    st.markdown(f"✅ {item}")
+                elif result is False:
+                    st.markdown(f"❌ {item}")
+                else:
+                    st.markdown(f"⚠️ {item} (Cannot determine)")
+        
+        with col2:
+            st.markdown("#### Brand Character Feedback")
+            for strength in brand['strengths']:
+                st.markdown(f"✅ {strength}")
+            
+            for improvement in brand['improvements']:
+                st.markdown(f"💡 {improvement}")
+    
+    # Next steps
+    st.markdown("---")
+    st.markdown("### Next Steps to Improve")
+    
+    # Determine which level to target next
+    next_level = min(level + 1, 4)
+    next_level_name = buttons['level_name']  # We already have this loaded
+    
+    if next_level == 4:
+        st.markdown(f"Your design is approaching 10x Designer level. Focus on these key improvements:")
+    else:
+        st.markdown(f"To reach {next_level_name} Thinking level, focus on these key improvements:")
+    
+    # List top 3 improvements
+    improvements = overall['improvements']
+    if improvements:
+        for i, improvement in enumerate(improvements[:3]):
+            st.markdown(f"{i+1}. {improvement}")
+
+def display_aggregate_report():
+    """Display aggregate evaluation report"""
+    report_path = os.path.join(EVALUATION_PATH, "aggregate_evaluation_report.json")
+    viz_path = os.path.join(EVALUATION_PATH, "aggregate_evaluation_viz.png")
+    
+    if not os.path.exists(report_path):
+        st.warning("No aggregate report found. Please run evaluations first.")
+        return
+    
+    report = load_json_file(report_path)
+    if not report:
+        return
+    
+    st.title("Aggregate Evaluation Report")
+    st.markdown(f"### Overview of {report['total_evaluations']} Design Evaluations")
+    
+    # Display visualization if available
+    if os.path.exists(viz_path):
+        st.image(viz_path, use_column_width=True)
+    
+    # Display key metrics
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Average Score", f"{report['average_scores']['overall']}/100")
+    
+    with col2:
+        # Find most common level
+        levels = report['level_distribution']['counts']
+        most_common = max(levels, key=lambda k: levels[k])
+        level_name = {1: "Dandelion", 2: "Designer", 3: "Business", 4: "10x Designer"}[int(most_common)]
+        st.metric("Most Common Level", level_name)
+    
+    with col3:
+        st.metric("Strongest Category", report['strongest_category'].title())
+    
+    # Display category breakdown
+    st.markdown("### Category Averages")
+    categories = report['average_scores']['categories']
+    category_df = pd.DataFrame({
+        'Category': list(categories.keys()),
+        'Score': list(categories.values())
+    })
+    
+    # Calculate the color gradient based on score
+    colors = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6']
+    category_df['Color'] = category_df['Score'].apply(
+        lambda score: colors[min(3, int(score/25))]
+    )
+    
+    # Create a custom bar chart
+    fig, ax = plt.subplots(figsize=(10, 5))
+    bars = ax.barh(category_df['Category'], category_df['Score'], color=category_df['Color'])
+    ax.set_xlim(0, 100)
+    ax.set_xlabel('Score')
+    ax.set_title('Average Category Scores')
+    
+    # Add text labels
+    for i, bar in enumerate(bars):
+        ax.text(
+            bar.get_width() + 2,
+            bar.get_y() + bar.get_height()/2,
+            f"{category_df['Score'].iloc[i]}/100",
+            va='center'
+        )
+    
+    st.pyplot(fig)
+    
+    # Display level distribution
+    st.markdown("### Thinking Level Distribution")
+    level_counts = report['level_distribution']['counts']
+    level_pcts = report['level_distribution']['percentages']
+    
+    level_df = pd.DataFrame({
+        'Level': ["Dandelion", "Designer", "Business", "10x Designer"],
+        'Count': [level_counts[str(i)] for i in range(1, 5)],
+        'Percentage': [level_pcts[str(i)] for i in range(1, 5)]
+    })
+    
+    st.dataframe(level_df, use_container_width=True)
+    
+    # Display recommendations
+    st.markdown("### Improvement Recommendations")
+    
+    weakest_category = report['weakest_category']
+    recommendations = {
+        'typography': [
+            "Establish clearer typographic hierarchy between headings and body text",
+            "Ensure consistent font usage across the design",
+            "Optimize font sizes for better readability (minimum 12px for body text)"
+        ],
+        'buttons': [
+            "Increase button size to be more touch-friendly (minimum 44-48px)",
+            "Create clear visual hierarchy between primary and secondary actions",
+            "Ensure buttons have clear affordance (make it obvious they're clickable)"
+        ],
+        'brand_character': [
+            "Develop more distinctive color palettes to enhance brand identity",
+            "Improve color harmony for stronger emotional impact",
+            "Create memorable 'wow moments' to engage users emotionally"
+        ]
+    }
+    
+    st.markdown(f"#### Focus on Improving: {weakest_category.title()}")
+    
+    for rec in recommendations.get(weakest_category, []):
+        st.markdown(f"💡 {rec}")
+
+def upload_and_evaluate():
+    """Upload and evaluate a design"""
+    st.markdown("### Upload Design for Evaluation")
+    
+    uploaded_file = st.file_uploader("Upload a design to evaluate", type=['jpg', 'jpeg', 'png'])
+    
+    if uploaded_file is not None:
+        # Create a temporary file to save the uploaded image
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        temp_id = f"upload_{timestamp}"
+        temp_path = os.path.join(DATA_PATH, f"{temp_id}.jpg")
+        
+        with open(temp_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        
+        st.image(temp_path, caption="Uploaded Design", use_column_width=True)
+        
+        # Add metadata
+        website_url = st.text_input("Website URL (optional)")
+        design_title = st.text_input("Design Title (optional)", value="Uploaded Design")
+        tags_input = st.text_input("Tags (comma-separated, optional)")
+        tags = [tag.strip() for tag in tags_input.split(',')] if tags_input else []
+        
+        # Create metadata file
+        metadata = {
+            "id": temp_id,
+            "title": design_title,
+            "website_url": website_url,
+            "tags": tags,
+            "screenshot": f"{temp_id}.jpg",
+            "captured_at": datetime.now().isoformat()
+        }
+        
+        metadata_path = os.path.join(DATA_PATH, f"{temp_id}.json")
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+        
+        # Run button
+        if st.button("Run 10x Designer Evaluation"):
+            with st.spinner("Analyzing design..."):
+                # Run analysis script
+                st.markdown("#### Running Design Analysis...")
+                analysis_script = os.path.join(SCRIPTS_PATH, "design_analyzer.py")
+                analysis_args = [
+                    "--input", temp_path,
+                    "--output", os.path.join(ANALYSIS_PATH, f"{temp_id}_analysis.json"),
+                    "--metadata", json.dumps(metadata)
+                ]
+                analysis_code = run_script(analysis_script, analysis_args)
+                
+                if analysis_code != 0:
+                    st.error("Analysis failed. Please check the logs.")
+                    return
+                
+                # Run evaluation script
+                st.markdown("#### Running 10x Designer Evaluation...")
+                eval_script = os.path.join(SCRIPTS_PATH, "design_evaluator.py")
+                eval_args = [
+                    "--input", os.path.join(ANALYSIS_PATH, f"{temp_id}_analysis.json"),
+                    "--output", os.path.join(EVALUATION_PATH, f"{temp_id}_evaluation.json")
+                ]
+                eval_code = run_script(eval_script, eval_args)
+                
+                if eval_code != 0:
+                    st.error("Evaluation failed. Please check the logs.")
+                    return
+                
+                # Load and display evaluation
+                eval_path = os.path.join(EVALUATION_PATH, f"{temp_id}_evaluation.json")
+                evaluation = load_json_file(eval_path)
+                
+                if evaluation:
+                    display_evaluation(evaluation)
+                else:
+                    st.error("Failed to load evaluation results.")
+
+def run_data_collection():
+    """Run data collection process"""
+    st.markdown("### Data Collection")
+    
+    # Configuration options
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        max_pages = st.number_input("Number of Pages to Scrape", min_value=1, max_value=20, value=5)
+        max_sites = st.number_input("Maximum Number of Sites", min_value=1, max_value=100, value=25)
+    
+    with col2:
+        delay = st.number_input("Delay Between Requests (seconds)", min_value=1, max_value=10, value=2)
+        st.markdown("This helps prevent overloading the server")
+    
+    # Run button
+    if st.button("Start Data Collection"):
+        with st.spinner("Collecting reference designs from godly.website..."):
+            # Run scraper script
+            scraper_script = os.path.join(SCRIPTS_PATH, "scrape_godly.py")
+            scraper_args = [
+                "--pages", str(max_pages),
+                "--sites", str(max_sites),
+                "--delay", str(delay)
+            ]
+            
+            run_script(scraper_script, scraper_args)
+            
+            # Check results
+            index_path = os.path.join(DATA_PATH, "raw", "godly", "index.json")
+            if os.path.exists(index_path):
+                data = load_json_file(index_path)
+                if data:
+                    st.success(f"Successfully collected {len(data)} reference designs!")
+                    
+                    # Show a sample
+                    if len(data) > 0:
+                        sample = data[0]
+                        st.markdown("#### Sample Collected Design")
+                        st.json(sample, expanded=False)
+                else:
+                    st.error("Data collection failed or no designs found.")
+            else:
+                st.error("Data collection failed. Index file not found.")
+
+def run_analysis():
+    """Run design analysis process"""
+    st.markdown("### Design Analysis")
+    
+    # Check if data is available
+    data_dir = os.path.join(DATA_PATH, "raw", "godly")
+    if not os.path.exists(data_dir):
+        st.warning("No data available. Please run data collection first.")
+        return
+    
+    # Check index file
+    index_path = os.path.join(data_dir, "index.json")
+    if not os.path.exists(index_path):
+        st.warning("No index file found. Data collection may be incomplete.")
+        return
+    
+    # Load index to show stats
+    data = load_json_file(index_path)
+    if data:
+        st.info(f"Found {len(data)} designs available for analysis")
+    
+    # Run button
+    if st.button("Start Design Analysis"):
+        with st.spinner("Analyzing designs..."):
+            # Run analyzer script
+            analyzer_script = os.path.join(SCRIPTS_PATH, "design_analyzer.py")
+            run_script(analyzer_script)
+            
+            # Check results
+            analysis_index_path = os.path.join(ANALYSIS_PATH, "analysis_index.json")
+            if os.path.exists(analysis_index_path):
+                analysis_data = load_json_file(analysis_index_path)
+                if analysis_data:
+                    st.success(f"Successfully analyzed {len(analysis_data)} designs!")
+                    
+                    # Show a sample
+                    if len(analysis_data) > 0:
+                        sample = analysis_data[0]
+                        st.markdown("#### Sample Analysis")
+                        
+                        # Show color palette
+                        st.markdown("##### Color Palette")
+                        display_color_palette(sample.get('color_analysis', {}).get('extracted_colors', []))
+                        
+                        # Show some analysis data
+                        st.markdown("##### Analysis Metrics")
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.metric("Color Harmony", f"{sample.get('color_analysis', {}).get('harmony_score', 0)}/100")
+                            st.metric("Text Blocks", sample.get('typography_analysis', {}).get('text_block_count', 0))
+                            
+                        with col2:
+                            st.metric("Button Count", sample.get('buttons', {}).get('count', 0))
+                            st.metric("White Space", f"{sample.get('layout_analysis', {}).get('white_space_percentage', 0)}%")
+                else:
+                    st.error("Analysis failed or no results found.")
+            else:
+                st.error("Analysis failed. Index file not found.")
+
+def run_evaluation():
+    """Run 10x Designer evaluation process"""
+    st.markdown("### 10x Designer Evaluation")
+    
+    # Check if analysis data is available
+    if not os.path.exists(ANALYSIS_PATH):
+        st.warning("No analysis data available. Please run design analysis first.")
+        return
+    
+    # Check for analysis files
+    analysis_files = [f for f in os.listdir(ANALYSIS_PATH) if f.endswith('_analysis.json')]
+    if not analysis_files:
+        st.warning("No analysis files found. Please run design analysis first.")
+        return
+    
+    st.info(f"Found {len(analysis_files)} analyzed designs available for evaluation")
+    
+    # Run button
+    if st.button("Start 10x Designer Evaluation"):
+        with st.spinner("Evaluating designs..."):
+            # Run evaluator script
+            evaluator_script = os.path.join(SCRIPTS_PATH, "design_evaluator.py")
+            run_script(evaluator_script)
+            
+            # Check results
+            eval_index_path = os.path.join(EVALUATION_PATH, "evaluation_index.json")
+            if os.path.exists(eval_index_path):
+                eval_data = load_json_file(eval_index_path)
+                if eval_data:
+                    st.success(f"Successfully evaluated {len(eval_data)} designs!")
+                    
+                    # Check for aggregate report
+                    aggregate_path = os.path.join(EVALUATION_PATH, "aggregate_evaluation_report.json")
+                    if os.path.exists(aggregate_path):
+                        # Ask user if they want to view aggregate report
+                        if st.button("View Aggregate Report"):
+                            display_aggregate_report()
+                    
+                    # Show a sample
+                    if len(eval_data) > 0:
+                        sample = eval_data[0]
+                        st.markdown("#### Sample Evaluation")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.metric("Overall Score", f"{sample['overall']['score']}/100")
+                        
+                        with col2:
+                            st.metric("Thinking Level", sample['overall']['level_name'])
+                        
+                        with col3:
+                            # Find highest scoring category
+                            categories = sample['category_scores']
+                            best_category = max(categories, key=categories.get)
+                            st.metric("Strongest Category", best_category.title())
+                        
+                        # Link to full evaluation
+                        if st.button("View Full Evaluation"):
+                            display_evaluation(sample)
+                else:
+                    st.error("Evaluation failed or no results found.")
+            else:
+                st.error("Evaluation failed. Index file not found.")
+
+def view_evaluations():
+    """View existing evaluations"""
+    st.markdown("### View Evaluations")
+    
+    # Check if evaluations exist
+    if not os.path.exists(EVALUATION_PATH):
+        st.warning("No evaluations found. Please run the evaluation process first.")
+        return
+    
+    # Find evaluation files
+    eval_files = [f for f in os.listdir(EVALUATION_PATH) if f.endswith('_evaluation.json') and not f.startswith('evaluation_index')]
+    
+    if not eval_files:
+        st.warning("No evaluation files found. Please run the evaluation process first.")
+        return
+    
+    # List evaluations
+    st.info(f"Found {len(eval_files)} evaluations")
+    
+    # Check for aggregate report
+    aggregate_path = os.path.join(EVALUATION_PATH, "aggregate_evaluation_report.json")
+    if os.path.exists(aggregate_path):
+        if st.button("View Aggregate Report"):
+            display_aggregate_report()
+    
+    # Create a selectbox to choose an evaluation
+    selected_file = st.selectbox("Select Evaluation", eval_files)
+    
+    if selected_file:
+        eval_path = os.path.join(EVALUATION_PATH, selected_file)
+        evaluation = load_json_file(eval_path)
+        
+        if evaluation:
+            display_evaluation(evaluation)
+        else:
+            st.error("Failed to load evaluation data.")
+
+def main():
+    st.sidebar.title("10x Designer AI")
+    st.sidebar.markdown("AI-powered design feedback based on the 10x Designer framework")
+    
+    # Sidebar navigation
+    pages = {
+        "Home": "home",
+        "Upload & Evaluate": "upload",
+        "View Evaluations": "view",
+        "Data Collection": "collect",
+        "Design Analysis": "analyze",
+        "Run Evaluation": "evaluate",
+        "About": "about"
+    }
+    
+    selected_page = st.sidebar.radio("Navigation", list(pages.keys()))
+    page = pages[selected_page]
+    
+    # Render selected page
+    if page == "home":
+        st.title("10x Designer AI")
+        st.markdown("Welcome to the AI-powered design feedback tool based on the 10x Designer framework.")
+        
+        st.markdown("""
+        ## What is a 10x Designer?
+        
+        A 10x Designer masterfully combines creativity, usability, branding, and business strategy to create designs that are both visually stunning and strategically effective.
+        
+        ## The Four Thinking Levels
+        
+        1. **Dandelion Thinking** 😵  
+           Following trends blindly without questioning anything.
+        
+        2. **Designer Thinking** 🎨  
+           Caring about aesthetics, but without thinking about usability or business impact.
+        
+        3. **Business Thinking** 💼  
+           Caring about business outcomes but often sacrificing quality and creativity.
+        
+        4. **10x Designer Thinking** 🚀  
+           Combining creativity, usability, branding, and business strategy masterfully.
+        """)
+        
+        st.markdown("""
+        ## Getting Started
+        
+        1. **Upload & Evaluate** - Upload your own design for instant feedback
+        2. **View Evaluations** - Browse existing evaluations
+        3. **Data Collection** - Collect reference designs from godly.website
+        4. **Design Analysis** - Analyze the collected designs
+        5. **Run Evaluation** - Evaluate designs against the 10x Designer framework
+        """)
+    
+    elif page == "upload":
+        st.title("Upload & Evaluate")
+        upload_and_evaluate()
+    
+    elif page == "view":
+        st.title("View Evaluations")
+        view_evaluations()
+    
+    elif page == "collect":
+        st.title("Data Collection")
+        run_data_collection()
+    
+    elif page == "analyze":
+        st.title("Design Analysis")
+        run_analysis()
+    
+    elif page == "evaluate":
+        st.title("Run Evaluation")
+        run_evaluation()
+    
+    elif page == "about":
+        st.title("About 10x Designer AI")
+        st.markdown("""
+        ## What is a 10x Designer?
+        
+        A 10x Designer masterfully combines creativity, usability, branding, and business strategy. They create modern, timeless masterpieces that elevate brands.
+        
+        ## The Four Thinking Levels
+        
+        1. **Dandelion Thinking** 😵  
+           Following trends blindly without questioning anything.
+        
+        2. **Designer Thinking** 🎨  
+           Caring about aesthetics, but without thinking about usability or business impact.
+        
+        3. **Business Thinking** 💼  
+           Caring about business outcomes but often sacrificing quality and creativity.
+        
+        4. **10x Designer Thinking** 🚀  
+           Combining creativity, usability, branding, and business strategy masterfully.
+        
+        ## How It Works
+        
+        This tool analyzes your design across three key categories:
+        
+        1. **Typography & Readability**: Font choices, hierarchy, and readability
+        2. **Buttons & Interactions**: Button design, usability, and conversion potential
+        3. **Brand Character**: Uniqueness, emotional impact, and brand alignment
+        
+        Each category is evaluated based on the 10x Designer framework to determine your current thinking level and provide actionable improvements.
+        """)
+
+if __name__ == "__main__":
+    main()
