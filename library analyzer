@@ -1,0 +1,1004 @@
+def _get_default_standards(self):
+        """Default standards when no reference data is available"""
+        return {
+            'typography': {
+                'avg_text_blocks': 15,
+                'avg_size_ratio': 3.0,
+                'avg_headings': 3
+            },
+            'buttons': {
+                'avg_button_count': 5,
+                'avg_touch_friendly': 60,
+                'avg_hierarchy': 70
+            },
+            'brand_character': {
+                'avg_color_count': 4,
+                'avg_harmony': 70,
+                'avg_white_space': 30,
+                'avg_golden_ratio': 75
+            }
+        }
+    
+    def load_website_library(self, max_sites=0):
+        """Load website library from input directory"""
+        index_path = os.path.join(self.input_dir, "index.json")
+        
+        if not os.path.exists(index_path):
+            logger.error(f"Website library index not found: {index_path}")
+            return []
+        
+        try:
+            with open(index_path, 'r') as f:
+                websites = json.load(f)
+            
+            logger.info(f"Loaded {len(websites)} websites from library")
+            
+            # Limit to max_sites if specified
+            if max_sites > 0:
+                websites = websites[:max_sites]
+                logger.info(f"Limited to {len(websites)} websites")
+            
+            return websites
+        except Exception as e:
+            logger.error(f"Error loading website library: {e}")
+            return []
+    
+    def analyze_colors(self, image_path, num_colors=5):
+        """Extract dominant colors from image using K-means clustering"""
+        try:
+            image = cv2.imread(image_path)
+            if image is None:
+                logger.error(f"Could not read image: {image_path}")
+                return {
+                    "colors": [],
+                    "harmony_score": 0,
+                    "dominant_color": None
+                }
+            
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            
+            # Reshape image for clustering
+            pixels = image.reshape(-1, 3)
+            
+            # Take a sample if the image is large
+            if len(pixels) > 10000:
+                indices = np.random.choice(len(pixels), 10000, replace=False)
+                pixels = pixels[indices]
+            
+            # Cluster pixels to find dominant colors
+            kmeans = KMeans(n_clusters=num_colors, n_init=10)
+            kmeans.fit(pixels)
+            
+            # Get colors and their percentage
+            colors = kmeans.cluster_centers_.astype(int)
+            pixel_labels = kmeans.labels_
+            
+            # Count labels to determine color prominence
+            counts = Counter(pixel_labels)
+            total = sum(counts.values())
+            
+            # Create color info with hex values and percentages
+            color_info = []
+            for i in range(num_colors):
+                count = counts.get(i, 0)
+                percentage = (count / total) * 100
+                
+                # Skip colors with very low presence
+                if percentage < 5:
+                    continue
+                
+                r, g, b = colors[i]
+                hex_color = f"#{r:02x}{g:02x}{b:02x}"
+                
+                # Convert to HSV for additional analysis
+                h, s, v = colorsys.rgb_to_hsv(r/255, g/255, b/255)
+                
+                color_info.append({
+                    "hex": hex_color,
+                    "rgb": colors[i].tolist(),
+                    "hsv": [round(h*360), round(s*100), round(v*100)],
+                    "percentage": round(percentage, 2)
+                })
+            
+            # Sort by percentage (descending)
+            color_info.sort(key=lambda x: x["percentage"], reverse=True)
+            
+            # Calculate color harmony
+            harmony_score = self._analyze_color_harmony(color_info)
+            
+            return {
+                "colors": color_info,
+                "harmony_score": harmony_score,
+                "dominant_color": color_info[0] if color_info else None
+            }
+        
+        except Exception as e:
+            logger.error(f"Error analyzing colors in {image_path}: {e}")
+            return {
+                "colors": [],
+                "harmony_score": 0,
+                "dominant_color": None
+            }
+    
+    def _analyze_color_harmony(self, colors):
+        """Analyze color harmony (0-100 score)"""
+        if not colors or len(colors) < 2:
+            return 50  # Neutral score for insufficient data
+        
+        try:
+            # Extract HSV values
+            hsv_colors = [color["hsv"] for color in colors if "hsv" in color]
+            
+            if not hsv_colors:
+                return 50
+            
+            # Normalize HSV values
+            normalized_hsv = [(h/360, s/100, v/100) for h, s, v in hsv_colors]
+            
+            # Analyze hue differences (harmony often comes from complementary or analogous hues)
+            harmony_score = 50  # Start neutral
+            
+            # Check for analogous colors (similar hues)
+            hues = [h for h, _, _ in normalized_hsv]
+            hue_diffs = []
+            
+            for i in range(len(hues)):
+                for j in range(i+1, len(hues)):
+                    # Calculate smallest distance between hues (considering the circular nature)
+                    diff = min(abs(hues[i] - hues[j]), 1 - abs(hues[i] - hues[j]))
+                    hue_diffs.append(diff)
+            
+            if hue_diffs:
+                avg_diff = sum(hue_diffs) / len(hue_diffs)
+                
+                # Analogous colors (close hues)
+                if avg_diff < 0.1:
+                    harmony_score += 15
+                
+                # Complementary colors (opposite hues)
+                if any(0.45 < diff < 0.55 for diff in hue_diffs):
+                    harmony_score += 10
+                
+                # Check saturation and value consistency
+                saturations = [s for _, s, _ in normalized_hsv]
+                values = [v for _, _, v in normalized_hsv]
+                
+                sat_range = max(saturations) - min(saturations)
+                val_range = max(values) - min(values)
+                
+                # Consistent saturation and value often looks harmonious
+                if sat_range < 0.3:
+                    harmony_score += 10
+                
+                if val_range < 0.3:
+                    harmony_score += 10
+            
+            return min(100, max(0, harmony_score))
+            
+        except Exception as e:
+            logger.error(f"Error analyzing color harmony: {e}")
+            return 50
+    
+    def analyze_typography(self, image_path):
+        """Extract text and typographic features from image"""
+        try:
+            # Use Tesseract OCR to extract text
+            img = Image.open(image_path)
+            
+            # OCR with detailed configuration
+            ocr_data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
+            
+            text_blocks = []
+            fonts = []
+            sizes = []
+            
+            # Process OCR data
+            confidence_threshold = 30  # Min confidence for text
+            for i in range(len(ocr_data['text'])):
+                if ocr_data['text'][i].strip() and ocr_data['conf'][i] > confidence_threshold:
+                    text_block = {
+                        'text': ocr_data['text'][i],
+                        'confidence': ocr_data['conf'][i],
+                        'size': ocr_data['height'][i],  # Use height as approximation of font size
+                        'position': {
+                            'x': ocr_data['left'][i],
+                            'y': ocr_data['top'][i],
+                            'width': ocr_data['width'][i],
+                            'height': ocr_data['height'][i]
+                        }
+                    }
+                    text_blocks.append(text_block)
+                    sizes.append(ocr_data['height'][i])
+            
+            # Analyze font size distribution
+            if sizes:
+                # Filter out extreme outliers (very small or very large)
+                filtered_sizes = [s for s in sizes if s > 5 and s < 200]  # Arbitrary limits
+                
+                if filtered_sizes:
+                    min_size = min(filtered_sizes)
+                    max_size = max(filtered_sizes)
+                    avg_size = sum(filtered_sizes) / len(filtered_sizes)
+                    
+                    # Count occurrences of each size
+                    size_counts = Counter(filtered_sizes)
+                    
+                    # Find most common sizes (potential standard sizes)
+                    common_sizes = size_counts.most_common(3)
+                    
+                    # Identify potential heading sizes (significantly larger than average)
+                    potential_headings = [s for s in filtered_sizes if s > avg_size * 1.5]
+                    
+                    size_analysis = {
+                        'min_size': min_size,
+                        'max_size': max_size,
+                        'avg_size': avg_size,
+                        'common_sizes': common_sizes,
+                        'size_ratio': max_size / min_size if min_size > 0 else 0,
+                        'potential_headings': len(potential_headings)
+                    }
+                else:
+                    size_analysis = {
+                        'min_size': 0,
+                        'max_size': 0,
+                        'avg_size': 0,
+                        'common_sizes': [],
+                        'size_ratio': 0,
+                        'potential_headings': 0
+                    }
+            else:
+                size_analysis = {
+                    'min_size': 0,
+                    'max_size': 0,
+                    'avg_size': 0,
+                    'common_sizes': [],
+                    'size_ratio': 0,
+                    'potential_headings': 0
+                }
+            
+            # Analyze text density and distribution
+            img_height, img_width = img.size[1], img.size[0]
+            total_text_area = sum(block['position']['width'] * block['position']['height'] for block in text_blocks)
+            text_density = (total_text_area / (img_width * img_height)) * 100 if img_width * img_height > 0 else 0
+            
+            return {
+                'text_blocks': text_blocks[:20],  # Limit to first 20 for brevity
+                'text_block_count': len(text_blocks),
+                'size_analysis': size_analysis,
+                'text_density': text_density,
+                'text_detected': len(text_blocks) > 0
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing typography in {image_path}: {e}")
+            return {
+                'text_blocks': [],
+                'text_block_count': 0,
+                'size_analysis': {
+                    'min_size': 0,
+                    'max_size': 0,
+                    'avg_size': 0,
+                    'common_sizes': [],
+                    'size_ratio': 0,
+                    'potential_headings': 0
+                },
+                'text_density': 0,
+                'text_detected': False
+            }
+    
+    def analyze_layout(self, image_path):
+        """Analyze layout structure and composition"""
+        try:
+            # Load image
+            image = cv2.imread(image_path)
+            if image is None:
+                logger.error(f"Could not read image: {image_path}")
+                return {
+                    'dimensions': {'width': 0, 'height': 0, 'ratio': 0},
+                    'sections_count': 0,
+                    'sections': [],
+                    'white_space_percentage': 0,
+                    'golden_ratio_score': 0,
+                    'thirds_score': 0,
+                    'symmetry_score': 0,
+                    'composition_scores': {
+                        'golden_ratio': 0,
+                        'rule_of_thirds': 0,
+                        'symmetry': 0,
+                        'white_space': 0
+                    }
+                }
+            
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            
+            # Get image dimensions
+            height, width = gray.shape
+            
+            # Detect edges
+            edges = cv2.Canny(gray, 50, 150)
+            
+            # Find contours
+            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Filter small contours
+            min_area = (width * height) * 0.01  # 1% of image area
+            significant_contours = [cnt for cnt in contours if cv2.contourArea(cnt) > min_area]
+            
+            # Analyze sections
+            sections = []
+            for cnt in significant_contours:
+                x, y, w, h = cv2.boundingRect(cnt)
+                sections.append({
+                    'x': x,
+                    'y': y,
+                    'width': w,
+                    'height': h,
+                    'area': w * h,
+                    'area_percentage': (w * h) / (width * height) * 100
+                })
+            
+            # Analyze white space (approximation by looking at pixel intensity)
+            _, binary = cv2.threshold(gray, 230, 255, cv2.THRESH_BINARY)
+            white_pixel_count = cv2.countNonZero(binary)
+            white_space_percentage = (white_pixel_count / (width * height)) * 100
+            
+            # Analyze golden ratio adherence (approximate)
+            image_ratio = width / height
+            golden_ratio = 1.618
+            golden_ratio_difference = abs(image_ratio - golden_ratio)
+            golden_ratio_score = max(0, 100 - (golden_ratio_difference * 100))
+            
+            # Check for thirds (rule of thirds)
+            thirds_alignments = self._check_thirds_alignment(sections, width, height)
+            thirds_score = thirds_alignments * 100 / len(sections) if sections else 0
+            
+            # Analyze symmetry
+            symmetry_score = self._analyze_symmetry(gray)
+            
+            return {
+                'dimensions': {
+                    'width': width,
+                    'height': height,
+                    'ratio': round(image_ratio, 3)
+                },
+                'sections_count': len(significant_contours),
+                'sections': sections[:5],  # Limit to top 5 for brevity
+                'white_space_percentage': round(white_space_percentage, 2),
+                'golden_ratio_score': round(golden_ratio_score, 2),
+                'thirds_score': round(thirds_score, 2),
+                'symmetry_score': symmetry_score,
+                'composition_scores': {
+                    'golden_ratio': round(golden_ratio_score, 2),
+                    'rule_of_thirds': round(thirds_score, 2),
+                    'symmetry': symmetry_score,
+                    'white_space': round(white_space_percentage, 2)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing layout in {image_path}: {e}")
+            return {
+                'dimensions': {'width': 0, 'height': 0, 'ratio': 0},
+                'sections_count': 0,
+                'sections': [],
+                'white_space_percentage': 0,
+                'golden_ratio_score': 0,
+                'thirds_score': 0,
+                'symmetry_score': 0,
+                'composition_scores': {
+                    'golden_ratio': 0,
+                    'rule_of_thirds': 0,
+                    'symmetry': 0,
+                    'white_space': 0
+                }
+            }
+    
+    def _check_thirds_alignment(self, sections, width, height):
+        """Check how many sections align with rule of thirds"""
+        # Define third lines
+        third_h1, third_h2 = height // 3, (height * 2) // 3
+        third_w1, third_w2 = width // 3, (width * 2) // 3
+        
+        # Tolerance (5% of dimension)
+        h_tolerance = height * 0.05
+        w_tolerance = width * 0.05
+        
+        alignments = 0
+        for section in sections:
+            x, y = section['x'], section['y']
+            x2, y2 = x + section['width'], y + section['height']
+            
+            # Check horizontal alignment
+            h_align = (abs(x - third_w1) < w_tolerance or 
+                       abs(x - third_w2) < w_tolerance or
+                       abs(x2 - third_w1) < w_tolerance or
+                       abs(x2 - third_w2) < w_tolerance)
+            
+            # Check vertical alignment
+            v_align = (abs(y - third_h1) < h_tolerance or 
+                       abs(y - third_h2) < h_tolerance or
+                       abs(y2 - third_h1) < h_tolerance or
+                       abs(y2 - third_h2) < h_tolerance)
+            
+            if h_align or v_align:
+                alignments += 1
+        
+        return alignments
+    
+    def _analyze_symmetry(self, gray_img):
+        """Analyze symmetry in the image"""
+        try:
+            height, width = gray_img.shape
+            
+            # Check horizontal symmetry
+            left_half = gray_img[:, :width//2]
+            right_half = gray_img[:, width//2:]
+            right_half_flipped = cv2.flip(right_half, 1)
+            
+            # Resize to ensure same dimensions
+            if left_half.shape[1] != right_half_flipped.shape[1]:
+                min_width = min(left_half.shape[1], right_half_flipped.shape[1])
+                left_half = left_half[:, :min_width]
+                right_half_flipped = right_half_flipped[:, :min_width]
+            
+            h_diff = cv2.absdiff(left_half, right_half_flipped)
+            h_symmetry = 100 - (np.sum(h_diff) / (left_half.size * 255) * 100)
+            
+            # Check vertical symmetry
+            top_half = gray_img[:height//2, :]
+            bottom_half = gray_img[height//2:, :]
+            bottom_half_flipped = cv2.flip(bottom_half, 0)
+            
+            # Resize to ensure same dimensions
+            if top_half.shape[0] != bottom_half_flipped.shape[0]:
+                min_height = min(top_half.shape[0], bottom_half_flipped.shape[0])
+                top_half = top_half[:min_height, :]
+                bottom_half_flipped = bottom_half_flipped[:min_height, :]
+            
+            v_diff = cv2.absdiff(top_half, bottom_half_flipped)
+            v_symmetry = 100 - (np.sum(v_diff) / (top_half.size * 255) * 100)
+            
+            # Take maximum of horizontal and vertical symmetry
+            # Usually designs are either horizontally or vertically symmetric, not both
+            symmetry_score = max(h_symmetry, v_symmetry)
+            
+            return round(symmetry_score, 2)
+        except Exception as e:
+            logger.error(f"Error analyzing symmetry: {e}")
+            return 0
+    
+    def find_buttons(self, image_path):
+        """Attempt to detect buttons in the design"""
+        try:
+            # Load image
+            image = cv2.imread(image_path)
+            if image is None:
+                logger.error(f"Could not read image: {image_path}")
+                return {
+                    'count': 0,
+                    'buttons': [],
+                    'touch_friendly_percentage': 0,
+                    'button_hierarchy_score': 0,
+                    'avg_button_size': 0,
+                    'avg_aspect_ratio': 0
+                }
+            
+            height, width = image.shape[:2]
+            
+            # Convert to HSV to better detect colors
+            hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+            
+            # Potential button candidates (look for rectangles with consistent color)
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+            edges = cv2.Canny(blurred, 50, 150)
+            
+            # Find contours
+            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            buttons = []
+            min_button_size = 44  # Minimum size for touch-friendly buttons
+            
+            for cnt in contours:
+                # Approximate contour as polygon
+                peri = cv2.arcLength(cnt, True)
+                approx = cv2.approxPolyDP(cnt, 0.04 * peri, True)
+                
+                # Check if it's a rectangle (4 vertices) or rounded rect (more vertices but similar shape)
+                if len(approx) >= 4 and len(approx) <= 8:
+                    x, y, w, h = cv2.boundingRect(cnt)
+                    
+                    # Button-like dimensions (not too small, not too large, reasonable aspect ratio)
+                    min_dim = min(width, height) * 0.03  # At least 3% of smaller dimension
+                    max_dim = min(width, height) * 0.3   # At most 30% of smaller dimension
+                    aspect_ratio = w / h if h > 0 else 0
+                    
+                    if (w > min_dim and h > min_dim and 
+                        w < max_dim and h < max_dim and 
+                        0.5 < aspect_ratio < 5):  # Reasonable aspect ratio for buttons
+                        
+                        # Get average color inside the rectangle
+                        mask = np.zeros(gray.shape, np.uint8)
+                        cv2.drawContours(mask, [cnt], 0, 255, -1)
+                        mean_color = cv2.mean(image, mask=mask)[:3]
+                        
+                        # Check if the button is touch-friendly (minimum 44px)
+                        touch_friendly = w >= min_button_size and h >= min_button_size
+                        
+                        buttons.append({
+                            'x': x,
+                            'y': y,
+                            'width': w,
+                            'height': h,
+                            'area': w * h,
+                            'aspect_ratio': round(aspect_ratio, 2),
+                            'color': [int(c) for c in mean_color],
+                            'touch_friendly': touch_friendly
+                        })
+            
+            # Sort by area (descending)
+            buttons.sort(key=lambda x: x['area'], reverse=True)
+            
+            # Calculate metrics
+            touch_friendly_count = sum(1 for btn in buttons if btn['touch_friendly'])
+            touch_friendly_percentage = (touch_friendly_count / len(buttons) * 100) if buttons else 0
+            
+            # Analyze button hierarchy
+            button_hierarchy_score = 0
+            if len(buttons) >= 2:
+                # Check if there's a clear primary button (significantly larger)
+                sizes = [btn['area'] for btn in buttons]
+                largest = max(sizes)
+                second_largest = sorted(sizes)[-2] if len(sizes) > 1 else 0
+                
+                if largest > second_largest * 1.5:  # Primary button is 50% larger
+                    button_hierarchy_score = 100
+                elif largest > second_largest * 1.2:  # Primary button is 20% larger
+                    button_hierarchy_score = 70
+                else:
+                    button_hierarchy_score = 30
+            
+            return {
+                'count': len(buttons),
+                'buttons': buttons[:10],  # Limit to top 10
+                'touch_friendly_percentage': round(touch_friendly_percentage, 2),
+                'button_hierarchy_score': button_hierarchy_score,
+                'avg_button_size': sum(btn['area'] for btn in buttons) / len(buttons) if buttons else 0,
+                'avg_aspect_ratio': sum(btn['aspect_ratio'] for btn in buttons) / len(buttons) if buttons else 0
+            }
+            
+        except Exception as e:
+            logger.error(f"Error detecting buttons in {image_path}: {e}")
+            return {
+                'count': 0,
+                'buttons': [],
+                'touch_friendly_percentage': 0,
+                'button_hierarchy_score': 0,
+                'avg_button_size': 0,
+                'avg_aspect_ratio': 0
+            }
+    
+    def analyze_website(self, website):
+        """Analyze a website from the library"""
+        website_id = website['id']
+        screenshot_path = os.path.join(self.screenshot_dir, website['screenshot'])
+        
+        logger.info(f"Analyzing website: {website['title']} (ID: {website_id})")
+        
+        if not os.path.exists(screenshot_path):
+            logger.error(f"Screenshot not found: {screenshot_path}")
+            return None
+        
+        # Run all analyses
+        color_analysis = self.analyze_colors(screenshot_path)
+        typography_analysis = self.analyze_typography(screenshot_path)
+        layout_analysis = self.analyze_layout(screenshot_path)
+        button_analysis = self.find_buttons(screenshot_path)
+        
+        # Extract highlights from website data
+        highlights = website.get('highlights', [])
+        if isinstance(highlights, str):
+            highlights = [h.strip() for h in highlights.split(',') if h.strip()]
+        
+        # Combine into comprehensive analysis
+        analysis = {
+            'website_id': website_id,
+            'title': website['title'],
+            'url': website['url'],
+            'domain': website.get('domain', ''),
+            'category': website.get('category', 'Unknown'),
+            'highlights': highlights,
+            'analysis_timestamp': datetime.now().isoformat(),
+            'color_analysis': {
+                'extracted_colors': color_analysis['colors'],
+                'harmony_score': color_analysis['harmony_score'],
+                'dominant_color': color_analysis['dominant_color']
+            },
+            'typography_analysis': typography_analysis,
+            'layout_analysis': layout_analysis,
+            'buttons': button_analysis
+        }
+        
+        # Save analysis
+        output_path = os.path.join(self.output_dir, f"{website_id}_analysis.json")
+        with open(output_path, 'w') as f:
+            json.dump(analysis, f, indent=2)
+        
+        logger.info(f"Analysis completed for {website['title']}")
+        
+        return analysis
+    
+    def run_analysis(self, max_sites=0):
+        """Run analysis on all websites in the library"""
+        websites = self.load_website_library(max_sites)
+        logger.info(f"Found {len(websites)} websites to analyze")
+        
+        results = []
+        for website in tqdm(websites, desc="Analyzing websites"):
+            analysis = self.analyze_website(website)
+            if analysis:
+                results.append(analysis)
+        
+        # Create an index of analyses
+        output_path = os.path.join(self.output_dir, "library_analysis_index.json")
+        with open(output_path, 'w') as f:
+            json.dump(results, f, indent=2)
+        
+        # Create aggregate analysis
+        self.create_aggregate_analysis(results)
+        
+        logger.info(f"Analysis complete for {len(results)} websites")
+        return results
+    
+    def create_aggregate_analysis(self, analyses):
+        """Create aggregate analysis of all websites"""
+        if not analyses:
+            logger.error("No analyses to aggregate")
+            return None
+        
+        # Collect statistics
+        category_analyses = {}
+        highlight_analyses = {}
+        
+        # Global metrics
+        all_color_counts = []
+        all_harmony_scores = []
+        all_text_block_counts = []
+        all_size_ratios = []
+        all_heading_counts = []
+        all_white_space_percentages = []
+        all_golden_ratio_scores = []
+        all_button_counts = []
+        all_touch_friendly_percentages = []
+        all_button_hierarchy_scores = []
+        
+        # Process each analysis
+        for analysis in analyses:
+            # Extract category
+            category = analysis.get('category', 'Unknown')
+            if category not in category_analyses:
+                category_analyses[category] = []
+            category_analyses[category].append(analysis['website_id'])
+            
+            # Extract highlights
+            for highlight in analysis.get('highlights', []):
+                if highlight not in highlight_analyses:
+                    highlight_analyses[highlight] = []
+                highlight_analyses[highlight].append(analysis['website_id'])
+            
+            # Extract metrics
+            if 'color_analysis' in analysis and 'extracted_colors' in analysis['color_analysis']:
+                all_color_counts.append(len(analysis['color_analysis']['extracted_colors']))
+                all_harmony_scores.append(analysis['color_analysis'].get('harmony_score', 0))
+            
+            if 'typography_analysis' in analysis:
+                typo = analysis['typography_analysis']
+                all_text_block_counts.append(typo.get('text_block_count', 0))
+                size_analysis = typo.get('size_analysis', {})
+                size_ratio = size_analysis.get('size_ratio', 0)
+                if size_ratio > 0:
+                    all_size_ratios.append(size_ratio)
+                all_heading_counts.append(size_analysis.get('potential_headings', 0))
+            
+            if 'layout_analysis' in analysis:
+                layout = analysis['layout_analysis']
+                all_white_space_percentages.append(layout.get('white_space_percentage', 0))
+                all_golden_ratio_scores.append(layout.get('golden_ratio_score', 0))
+            
+            if 'buttons' in analysis:
+                buttons = analysis['buttons']
+                all_button_counts.append(buttons.get('count', 0))
+                all_touch_friendly_percentages.append(buttons.get('touch_friendly_percentage', 0))
+                all_button_hierarchy_scores.append(buttons.get('button_hierarchy_score', 0))
+        
+        # Calculate averages
+        def safe_average(values):
+            return sum(values) / len(values) if values else 0
+        
+        aggregate = {
+            'total_websites': len(analyses),
+            'categories': {
+                category: len(websites) for category, websites in category_analyses.items()
+            },
+            'highlights': {
+                highlight: len(websites) for highlight, websites in highlight_analyses.items()
+            },
+            'color_analysis': {
+                'avg_colors': safe_average(all_color_counts),
+                'avg_harmony': safe_average(all_harmony_scores)
+            },
+            'typography_analysis': {
+                'avg_text_blocks': safe_average(all_text_block_counts),
+                'avg_size_ratio': safe_average(all_size_ratios),
+                'avg_headings': safe_average(all_heading_counts)
+            },
+            'layout_analysis': {
+                'avg_white_space': safe_average(all_white_space_percentages),
+                'avg_golden_ratio': safe_average(all_golden_ratio_scores)
+            },
+            'button_analysis': {
+                'avg_buttons': safe_average(all_button_counts),
+                'avg_touch_friendly': safe_average(all_touch_friendly_percentages),
+                'avg_hierarchy': safe_average(all_button_hierarchy_scores)
+            },
+            'analysis_timestamp': datetime.now().isoformat()
+        }
+        
+        # Find top performing sites in each category
+        top_performers = {
+            'color_harmony': sorted(
+                [(a['website_id'], a['color_analysis'].get('harmony_score', 0)) 
+                 for a in analyses if 'color_analysis' in a and 'harmony_score' in a['color_analysis']],
+                key=lambda x: x[1], reverse=True
+            )[:5],
+            
+            'typography': sorted(
+                [(a['website_id'], a['typography_analysis']['size_analysis'].get('size_ratio', 0)) 
+                 for a in analyses if 'typography_analysis' in a and 'size_analysis' in a['typography_analysis']],
+                key=lambda x: x[1] if 1.5 < x[1] < 5 else 0, reverse=True
+            )[:5],
+            
+            'layout': sorted(
+                [(a['website_id'], a['layout_analysis'].get('golden_ratio_score', 0)) 
+                 for a in analyses if 'layout_analysis' in a],
+                key=lambda x: x[1], reverse=True
+            )[:5],
+            
+            'buttons': sorted(
+                [(a['website_id'], a['buttons'].get('touch_friendly_percentage', 0)) 
+                 for a in analyses if 'buttons' in a and a['buttons'].get('count', 0) > 0],
+                key=lambda x: x[1], reverse=True
+            )[:5]
+        }
+        
+        aggregate['top_performers'] = {
+            category: [{'website_id': site_id, 'score': score} for site_id, score in sites]
+            for category, sites in top_performers.items()
+        }
+        
+        # Save aggregate analysis
+        output_path = os.path.join(self.output_dir, "library_aggregate_analysis.json")
+        with open(output_path, 'w') as f:
+            json.dump(aggregate, f, indent=2)
+        
+        logger.info(f"Created aggregate analysis for {len(analyses)} websites")
+        
+        # Create visualization
+        self.create_aggregate_visualization(aggregate)
+        
+        return aggregate
+    
+    def create_aggregate_visualization(self, aggregate):
+        """Create visualization for the aggregate analysis"""
+        try:
+            # Create figure
+            plt.figure(figsize=(15, 10))
+            
+            # Distribution of websites by category
+            plt.subplot(2, 2, 1)
+            categories = list(aggregate['categories'].keys())
+            counts = list(aggregate['categories'].values())
+            
+            # Sort by count (descending)
+            sorted_indices = sorted(range(len(counts)), key=lambda i: counts[i], reverse=True)
+            categories = [categories[i] for i in sorted_indices]
+            counts = [counts[i] for i in sorted_indices]
+            
+            # Limit to top 10 categories
+            if len(categories) > 10:
+                other_count = sum(counts[10:])
+                categories = categories[:10] + ['Other']
+                counts = counts[:10] + [other_count]
+            
+            plt.bar(categories, counts)
+            plt.title('Website Categories')
+            plt.xticks(rotation=45, ha='right')
+            plt.tight_layout()
+            
+            # Top highlights
+            plt.subplot(2, 2, 2)
+            highlights = list(aggregate['highlights'].keys())
+            highlight_counts = list(aggregate['highlights'].values())
+            
+            # Sort by count (descending)
+            sorted_indices = sorted(range(len(highlight_counts)), key=lambda i: highlight_counts[i], reverse=True)
+            highlights = [highlights[i] for i in sorted_indices]
+            highlight_counts = [highlight_counts[i] for i in sorted_indices]
+            
+            # Limit to top 10 highlights
+            if len(highlights) > 10:
+                highlights = highlights[:10]
+                highlight_counts = highlight_counts[:10]
+            
+            plt.bar(highlights, highlight_counts)
+            plt.title('Top Design Highlights')
+            plt.xticks(rotation=45, ha='right')
+            plt.tight_layout()
+            
+            # Average metrics
+            plt.subplot(2, 2, 3)
+            metrics = [
+                'Color Harmony', 'Typography Ratio', 
+                'Golden Ratio', 'White Space %',
+                'Button Touch-Friendly %'
+            ]
+            values = [
+                aggregate['color_analysis']['avg_harmony'],
+                aggregate['typography_analysis']['avg_size_ratio'] * 20,  # Scale for visualization
+                aggregate['layout_analysis']['avg_golden_ratio'],
+                aggregate['layout_analysis']['avg_white_space'],
+                aggregate['button_analysis']['avg_touch_friendly']
+            ]
+            
+            plt.bar(metrics, values)
+            plt.title('Average Quality Metrics')
+            plt.xticks(rotation=45, ha='right')
+            plt.tight_layout()
+            
+            # Top performers
+            plt.subplot(2, 2, 4)
+            plt.text(0.5, 0.5, f"Top Performing Websites\n\n" + 
+                    f"Color Harmony: {', '.join([tp['website_id'] for tp in aggregate['top_performers']['color_harmony']])}\n\n" +
+                    f"Typography: {', '.join([tp['website_id'] for tp in aggregate['top_performers']['typography']])}\n\n" +
+                    f"Layout: {', '.join([tp['website_id'] for tp in aggregate['top_performers']['layout']])}\n\n" +
+                    f"Buttons: {', '.join([tp['website_id'] for tp in aggregate['top_performers']['buttons']])}\n",
+                    ha='center', va='center', fontsize=10)
+            plt.axis('off')
+            plt.title('Top Performing Websites')
+            
+            # Save the visualization
+            output_path = os.path.join(self.output_dir, "library_analysis_visualization.png")
+            plt.tight_layout()
+            plt.savefig(output_path)
+            plt.close()
+            
+            logger.info(f"Created aggregate visualization at {output_path}")
+            return output_path
+        except Exception as e:
+            logger.error(f"Error creating aggregate visualization: {e}")
+            return None
+
+def main():
+    logger.info("Starting website library analysis")
+    
+    # Create analyzer
+    analyzer = WebsiteLibraryAnalyzer(
+        input_dir=args.input_dir,
+        output_dir=args.output_dir,
+        screenshot_dir=args.screenshot_dir,
+        reference_dir=args.reference_dir
+    )
+    
+    # Run analysis
+    analyzer.run_analysis(args.max_sites)
+    
+    logger.info("Website library analysis complete")
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())#!/usr/bin/env python3
+"""
+Website Library Analyzer for AI Creative Director
+Analyzes imported website library against 10x Designer framework
+"""
+
+import os
+import sys
+import json
+import logging
+import argparse
+import pandas as pd
+import numpy as np
+from datetime import datetime
+from tqdm import tqdm
+import cv2
+from PIL import Image
+import matplotlib.pyplot as plt
+import colorsys
+
+# Set up argument parser
+parser = argparse.ArgumentParser(description='Analyze website library for AI Creative Director')
+parser.add_argument('--input-dir', type=str, default='data/library', help='Input directory containing website library')
+parser.add_argument('--output-dir', type=str, default='analysis/library', help='Output directory for analysis results')
+parser.add_argument('--screenshot-dir', type=str, default='data/library/screenshots', help='Directory with website screenshots')
+parser.add_argument('--log-file', type=str, default='logs/library_analysis.log', help='Log file path')
+parser.add_argument('--max-sites', type=int, default=0, help='Maximum number of sites to analyze (0 for all)')
+parser.add_argument('--reference-dir', type=str, default='analysis', help='Directory with existing analysis for reference standards')
+args = parser.parse_args()
+
+# Create directories if they don't exist
+os.makedirs(os.path.dirname(args.log_file), exist_ok=True)
+os.makedirs(args.output_dir, exist_ok=True)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(args.log_file),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("LibraryAnalyzer")
+
+class WebsiteLibraryAnalyzer:
+    def __init__(self, input_dir, output_dir, screenshot_dir, reference_dir):
+        self.input_dir = input_dir
+        self.output_dir = output_dir
+        self.screenshot_dir = screenshot_dir
+        self.reference_dir = reference_dir
+        
+        # Load reference standards if available
+        self.reference_standards = self._load_reference_standards()
+    
+    def _load_reference_standards(self):
+        """Load reference standards from existing analysis"""
+        aggregate_path = os.path.join(self.reference_dir, "aggregate_report.json")
+        
+        if os.path.exists(aggregate_path):
+            try:
+                with open(aggregate_path, 'r') as f:
+                    aggregate = json.load(f)
+                
+                logger.info(f"Loaded reference standards from aggregate report")
+                
+                # Extract standards
+                standards = {
+                    'typography': {
+                        'avg_text_blocks': aggregate.get('typography_analysis', {}).get('avg_text_blocks', 15),
+                        'avg_size_ratio': aggregate.get('typography_analysis', {}).get('avg_size_ratio', 3.0),
+                        'avg_headings': aggregate.get('typography_analysis', {}).get('avg_headings', 3)
+                    },
+                    'buttons': {
+                        'avg_button_count': aggregate.get('button_analysis', {}).get('avg_buttons', 5),
+                        'avg_touch_friendly': aggregate.get('button_analysis', {}).get('avg_touch_friendly', 60),
+                        'avg_hierarchy': aggregate.get('button_analysis', {}).get('avg_hierarchy', 70)
+                    },
+                    'brand_character': {
+                        'avg_color_count': aggregate.get('color_analysis', {}).get('avg_colors', 4),
+                        'avg_harmony': aggregate.get('color_analysis', {}).get('avg_harmony', 70),
+                        'avg_white_space': aggregate.get('layout_analysis', {}).get('avg_white_space', 30),
+                        'avg_golden_ratio': aggregate.get('layout_analysis', {}).get('avg_golden_ratio', 75)
+                    }
+                }
+                
+                return standards
+            except Exception as e:
+                logger.error(f"Error loading reference standards: {e}")
+                return self._get_default_standards()
+        
+        logger.warning("No aggregate report found, using default standards")
+        return self._get_default_standards()
+    
+    def _get_default_standards(self):
+        """Default standards when no reference data is available"""
+        return {
+            'typography': {
+                'avg_text_blocks': 15,
+                'avg_size_ratio': 3.0,
+                'avg_headings': 3
+            },
+            'buttons': {
+                'avg_button_count': 5,
+                'avg_touch_friendly': 60,
+                'avg_hierarchy': 70
