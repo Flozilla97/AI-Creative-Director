@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+"""
+Website Library Integration for AI Creative Director
+Imports existing website library and prepares it for analysis
+"""
+
+import os
+import sys
+import json
+import logging
+import argparse
+import pandas as pd
+import csv
+from urllib.parse import urlparse
+from datetime import datetime
+import time
+import requests
+import hashlib
+from tqdm import tqdm
+import re
+from urllib.request import urlretrieve
+from PIL import Image
+import io
+
+# Set up argument parser
+parser = argparse.ArgumentParser(description='Import website library for AI Creative Director')
+parser.add_argument('--input', type=str, default='library.csv', help='Input CSV file containing website library')
+parser.add_argument('--output-dir', type=str, default='data/library', help='Output directory for processed library')
+parser.add_argument('--screenshot-dir', type=str, default='data/library/screenshots', help='Directory for website screenshots')
+parser.add_argument('--log-file', type=str, default='logs/library_import.log', help='Log file path')
+parser.add_argument('--max-sites', type=int, default=0, help='Maximum number of sites to process (0 for all)')
+parser.add_argument('--take-screenshots', action='store_true', help='Take screenshots of websites')
+parser.add_argument('--api-key', type=str, help='API key for screenshot service')
+args = parser.parse_args()
+
+# Create directories if they don't exist
+os.makedirs(os.path.dirname(args.log_file), exist_ok=True)
+os.makedirs(args.output_dir, exist_ok=True)
+os.makedirs(args.screenshot_dir, exist_ok=True)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(args.log_file),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("LibraryImport")
+
+def clean_url(url):
+    """Clean and normalize URL"""
+    if not url:
+        return None
+    
+    # Remove extra quotes
+    url = url.strip('"\'')
+    
+    # Add protocol if missing
+    if not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
+    
+    # Parse URL to normalize
+    try:
+        parsed = urlparse(url)
+        return parsed.geturl()
+    except:
+        return url
+
+def extract_domain(url):
+    """Extract domain from URL"""
+    if not url:
+        return None
+    
+    try:
+        parsed = urlparse(url)
+        domain = parsed.netloc
+        # Remove www. prefix if present
+        if domain.startswith('www.'):
+            domain = domain[4:]
+        return domain
+    except:
+        return None
+
+def get_website_id(url):
+    """Generate a unique ID for a website"""
+    if not url:
+        return None
+    
+    # Create hash of the URL
+    domain = extract_domain(url)
+    if not domain:
+        return None
+    
+    # Use domain as base for ID, with hash for uniqueness
+    url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+    return f"{domain.replace('.', '_')}_{url_hash}"
+
+def take_screenshot(url, output_path, api_key=None):
+    """Take a screenshot of a website using a service or tool"""
+    if not url:
+        return False
+    
+    # Use ScreenshotAPI.net if API key is provided
+    if api_key:
+        api_url = "https://api.screenshotapi.net/screenshot"
+        params = {
+            "token": api_key,
+            "url": url,
+            "width": 1440,
+            "height": 900,
+            "output": "image",
+            "full_page": False
+        }
+        
+        try:
+            response = requests.get(api_url, params=params)
+            if response.status_code == 200:
+                with open(output_path, 'wb') as f:
+                    f.write(response.content)
+                return True
+            else:
+                logger.error(f"Screenshot API error: {response.status_code} - {response.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Error taking screenshot: {e}")
+            return False
+    
+    # If no API key, use a placeholder method - in production you'd want to use:
+    # - Selenium/Playwright for browser automation
+    # - A screenshot service API
+    # - Puppeteer or similar for headless Chrome
+    try:
+        url_parsed = urlparse(url)
+        domain = url_parsed.netloc
+        
+        # Download a favicon as a placeholder (not ideal but better than nothing)
+        favicon_url = f"https://www.google.com/s2/favicons?domain={domain}&sz=128"
+        response = requests.get(favicon_url)
+        
+        if response.status_code == 200:
+            # Create a placeholder image with the favicon
+            img = Image.new('RGB', (1440, 900), color='white')
+            
+            # Paste favicon if available
+            try:
+                favicon = Image.open(io.BytesIO(response.content))
+                # Center the favicon
+                position = ((1440 - favicon.width) // 2, (900 - favicon.height) // 2)
+                img.paste(favicon, position)
+            except:
+                # If favicon can't be processed, add text
+                pass
+            
+            # Add URL text
+            img.save(output_path)
+            logger.warning(f"Created placeholder screenshot for {url}")
+            return True
+        else:
+            logger.error(f"Failed to get favicon for {url}")
+            return False
+    except Exception as e:
+        logger.error(f"Error creating placeholder screenshot: {e}")
+        return False
+
+def process_csv_file(filepath):
+    """Process CSV file with website library"""
+    logger.info(f"Processing CSV file: {filepath}")
+    
+    try:
+        # First attempt to read with pandas
+        df = pd.read_csv(filepath, encoding='utf-8')
+        logger.info(f"Successfully read CSV with pandas: {len(df)} rows")
+    except Exception as e:
+        logger.error(f"Error reading CSV with pandas: {e}")
+        
+        # Fallback to manual parsing if pandas fails
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                headers = next(reader)
+                data = []
+                for row in reader:
+                    if len(row) >= len(headers):
+                        data.append(dict(zip(headers, row)))
+                    else:
+                        # Pad row if needed
+                        padded_row = row + [''] * (len(headers) - len(row))
+                        data.append(dict(zip(headers, padded_row)))
+                
+                df = pd.DataFrame(data)
+                logger.info(f"Successfully read CSV manually: {len(df)} rows")
+        except Exception as e2:
+            logger.error(f"Error with manual CSV parsing: {e2}")
+            return None
+    
+    # Clean up column names
+    df.columns = df.columns.str.strip()
+    
+    # Identify website URL column - it should be 'Website'
+    if 'Website' not in df.columns:
+        potential_url_columns = [col for col in df.columns if 'url' in col.lower() or 'website' in col.lower() or 'site' in col.lower()]
+        if potential_url_columns:
+            logger.warning(f"'Website' column not found. Using {potential_url_columns[0]} instead.")
+            df['Website'] = df[potential_url_columns[0]]
+        else:
+            logger.error("No website URL column found in CSV")
+            return None
+    
+    # Clean website URLs
+    df['website_url'] = df['Website'].apply(clean_url)
+    
+    # Filter out rows without valid URLs
+    df = df[df['website_url'].notna()]
+    
+    # Extract domains
+    df['domain'] = df['website_url'].apply(extract_domain)
+    
+    # Generate website IDs
+    df['website_id'] = df['website_url'].apply(get_website_id)
+    
+    # Filter out rows without valid IDs
+    df = df[df['website_id'].notna()]
+    
+    # Extract categories and highlights
+    category_col = 'Art' if 'Art' in df.columns else ('Page' if 'Page' in df.columns else None)
+    highlight_col = 'Highlight' if 'Highlight' in df.columns else None
+    
+    if category_col:
+        df['category'] = df[category_col].apply(lambda x: x.strip() if isinstance(x, str) else 'Unknown')
+    else:
+        df['category'] = 'Unknown'
+    
+    if highlight_col:
+        # Extract highlights as list
+        df['highlights'] = df[highlight_col].apply(
+            lambda x: [tag.strip() for tag in x.split(',')] if isinstance(x, str) else []
+        )
+    else:
+        df['highlights'] = [[] for _ in range(len(df))]
+    
+    # Limit to max_sites if specified
+    if args.max_sites > 0:
+        df = df.head(args.max_sites)
+    
+    logger.info(f"Processed {len(df)} websites with valid URLs")
+    
+    return df
+
+def save_website_library(df, output_dir):
+    """Save processed website library to output directory"""
+    websites = []
+    
+    for _, row in df.iterrows():
+        website = {
+            'id': row['website_id'],
+            'url': row['website_url'],
+            'domain': row['domain'],
+            'title': row.get('Name', row['domain']),
+            'category': row['category'],
+            'highlights': row['highlights'],
+            'figma_url': row.get('Figma URL', ''),
+            'screenshot': f"{row['website_id']}.jpg"
+        }
+        websites.append(website)
+    
+    # Save individual website files
+    for website in websites:
+        output_path = os.path.join(output_dir, f"{website['id']}.json")
+        with open(output_path, 'w') as f:
+            json.dump(website, f, indent=2)
+    
+    # Save index file
+    index_path = os.path.join(output_dir, "index.json")
+    with open(index_path, 'w') as f:
+        json.dump(websites, f, indent=2)
+    
+    # Save a CSV version of the library
+    csv_path = os.path.join(output_dir, "library.csv")
+    pd.DataFrame(websites).to_csv(csv_path, index=False)
+    
+    logger.info(f"Saved {len(websites)} websites to library")
+    
+    return websites
+
+def download_screenshots(websites, screenshot_dir, take_screenshots=False, api_key=None):
+    """Download screenshots for websites"""
+    if not take_screenshots:
+        logger.info("Skipping screenshot download (use --take-screenshots to enable)")
+        return
+    
+    logger.info(f"Downloading screenshots for {len(websites)} websites")
+    
+    successful = 0
+    for website in tqdm(websites, desc="Downloading screenshots"):
+        output_path = os.path.join(screenshot_dir, f"{website['id']}.jpg")
+        
+        # Skip if screenshot already exists
+        if os.path.exists(output_path):
+            logger.info(f"Screenshot already exists for {website['url']}")
+            successful += 1
+            continue
+        
+        # Take screenshot
+        if take_screenshot(website['url'], output_path, api_key):
+            successful += 1
+            # Be nice to the API service
+            time.sleep(1)
+    
+    logger.info(f"Downloaded {successful} screenshots")
+    return successful
+
+def main():
+    logger.info("Starting website library import")
+    
+    # Check if input file exists
+    if not os.path.exists(args.input):
+        logger.error(f"Input file not found: {args.input}")
+        return 1
+    
+    # Process CSV file
+    df = process_csv_file(args.input)
+    if df is None:
+        return 1
+    
+    # Save processed website library
+    websites = save_website_library(df, args.output_dir)
+    
+    # Download screenshots
+    download_screenshots(websites, args.screenshot_dir, args.take_screenshots, args.api_key)
+    
+    logger.info("Website library import complete")
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
