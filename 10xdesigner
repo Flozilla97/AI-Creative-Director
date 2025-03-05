@@ -1,0 +1,1457 @@
+# Check for touch-friendly sizing
+            if touch_friendly_percentage >= 80:  # 80% or more buttons are touch-friendly
+                indicators['touch_friendly'] = True
+                strengths.append("Buttons are appropriately sized for touch interactions")
+                checklist_results["Are buttons optimized for touchscreens (at least 48px size)?"] = True
+            else:
+                indicators['poor_sizing'] = True
+                improvements.append("Increase button size to at least 44-48px for better touch usability")
+                checklist_results["Are buttons optimized for touchscreens (at least 48px size)?"] = False
+            
+            # Analyze button hierarchy
+            if button_hierarchy_score >= 80:
+                indicators['clear_hierarchy'] = True
+                indicators['compelling_cta'] = True
+                strengths.append("Clear visual hierarchy distinguishes primary and secondary actions")
+                checklist_results["Does the button intuitively trigger the desired action?"] = True
+            elif button_hierarchy_score <= 30:
+                indicators['inconsistent_purpose'] = True
+                improvements.append("Establish clearer hierarchy between primary and secondary buttons")
+                checklist_results["Does the button intuitively trigger the desired action?"] = False
+            
+            # Analyze button consistency from button data
+            if len(buttons) >= 2:
+                # Check if button styles are consistent
+                aspect_ratios = [b.get('aspect_ratio', 0) for b in buttons]
+                if aspect_ratios:
+                    ratio_variation = np.std(aspect_ratios) / np.mean(aspect_ratios) if np.mean(aspect_ratios) > 0 else 0
+                    
+                    if ratio_variation > 0.5:  # High variation
+                        indicators['inconsistent_style'] = True
+                        improvements.append("Create more consistent button shapes across the design")
+                    else:
+                        strengths.append("Consistent button styling creates a cohesive user experience")
+            
+            # Determine thinking level based on indicators
+            level = self._determine_button_level(indicators)
+            
+            # Calculate score (0-100)
+            score = self._calculate_button_score(indicators, level, button_count)
+            
+            # Add level-specific analysis
+            if level == 1:  # Dandelion
+                improvements.append("Redesign buttons to be more obvious and user-friendly")
+            elif level == 2:  # Designer
+                strengths.append("Buttons have visual appeal")
+                improvements.append("Ensure buttons clearly communicate their purpose beyond aesthetics")
+            elif level == 3:  # Business
+                strengths.append("Buttons effectively guide user actions")
+                improvements.append("Add more brand character to button design while maintaining functionality")
+            elif level == 4:  # 10x
+                strengths.append("Buttons perfectly balance form, function, and brand identity")
+            
+            # Generate checklist results for remaining items
+            if "Are there subtle but effective micro-animations?" not in checklist_results:
+                checklist_results["Are there subtle but effective micro-animations?"] = None  # Cannot determine from static image
+            
+            if "Are there clear states for Default, Hover, Active, and Disabled?" not in checklist_results:
+                checklist_results["Are there clear states for Default, Hover, Active, and Disabled?"] = None  # Cannot determine from static image
+            
+            if "Is it clear that it's a button (clickability)?" not in checklist_results:
+                # Assume true if we detected buttons and they're consistent
+                checklist_results["Is it clear that it's a button (clickability)?"] = not indicators['inconsistent_style']
+            
+            return {
+                'level': level,
+                'level_name': self.thinking_levels[level],
+                'score': score,
+                'strengths': strengths,
+                'improvements': improvements,
+                'checklist_results': checklist_results
+            }
+            
+        except Exception as e:
+            logger.error(f"Error evaluating buttons: {e}")
+            return {
+                'level': 1,
+                'level_name': self.thinking_levels[1],
+                'score': 30,
+                'strengths': [],
+                'improvements': ["Error analyzing buttons"],
+                'checklist_results': {}
+            }
+    
+    def _determine_button_level(self, indicators):
+        """Determine button thinking level based on indicators"""
+        # 10x Designer (Level 4)
+        if ((indicators['touch_friendly'] and indicators['clear_hierarchy']) and
+            not (indicators['poor_contrast'] or indicators['inconsistent_style'])):
+            return 4
+        
+        # Business Thinking (Level 3)
+        elif (indicators['functional_priority'] or 
+              (not indicators['poor_sizing'] and not indicators['inconsistent_purpose'])):
+            return 3
+        
+        # Designer Thinking (Level 2)
+        elif ((indicators['aesthetic_focus'] or indicators['overly_decorative']) and 
+              not indicators['poor_sizing']):
+            return 2
+        
+        # Dandelion Thinking (Level 1)
+        else:
+            return 1
+    
+    def _calculate_button_score(self, indicators, level, button_count):
+        """Calculate button score (0-100)"""
+        base_scores = {1: 30, 2: 50, 3: 70, 4: 90}
+        
+        # Get base score from level
+        score = base_scores[level]
+        
+        # Adjust based on indicators
+        if indicators['poor_contrast'] or indicators['inconsistent_style']:
+            score -= 10
+        
+        if indicators['touch_friendly']:
+            score += 5
+        
+        if indicators['clear_hierarchy']:
+            score += 5
+        
+        if button_count == 0:
+            score = max(0, score - 20)  # Major penalty for no buttons
+        elif button_count < 2:
+            score -= 5  # Minor penalty for just one button (less to evaluate)
+        
+        # Ensure score stays within 0-100
+        return max(0, min(100, score))
+    
+    def evaluate_brand_character(self, design_analysis):
+        """Evaluate brand character against the 10x Designer framework"""
+        try:
+            color_analysis = design_analysis.get('color_analysis', {})
+            layout_analysis = design_analysis.get('layout_analysis', {})
+            typo_analysis = design_analysis.get('typography_analysis', {})
+            
+            if not color_analysis or not layout_analysis:
+                logger.warning("Missing color or layout analysis data")
+                return {
+                    'level': 1,
+                    'level_name': self.thinking_levels[1],
+                    'score': 30,
+                    'strengths': ["Insufficient data for detailed brand character analysis"],
+                    'improvements': ["Upload a clearer image for better brand analysis"],
+                    'checklist_results': {}
+                }
+            
+            # Extract key metrics
+            colors = color_analysis.get('extracted_colors', [])
+            harmony_score = color_analysis.get('harmony_score', 0)
+            white_space = layout_analysis.get('white_space_percentage', 0)
+            golden_ratio = layout_analysis.get('golden_ratio_score', 0)
+            thirds_score = layout_analysis.get('thirds_score', 0)
+            symmetry_score = layout_analysis.get('symmetry_score', 0)
+            
+            # Initialize evaluation metrics
+            indicators = {
+                'generic_elements': False,
+                'lacks_identity': False,
+                'no_emotional_connection': False,
+                'visually_strong': False,
+                'lacks_strategic_purpose': False,
+                'decorative_priority': False,
+                'functional_brand': False,
+                'lacks_wow_factor': False,
+                'limited_emotional_range': False,
+                'memorable_aesthetics': False,
+                'balanced_identity': False,
+                'emotional_resonance': False,
+                'unique_elements': False
+            }
+            
+            strengths = []
+            improvements = []
+            checklist_results = {}
+            
+            # Analyze color palette
+            color_count = len(colors)
+            
+            if color_count <= 1:
+                indicators['generic_elements'] = True
+                indicators['lacks_identity'] = True
+                improvements.append("Develop a more distinctive color palette to enhance brand identity")
+                checklist_results["Does the design match the brand's vision, mission, and values?"] = False
+            elif color_count >= 7:
+                indicators['decorative_priority'] = True
+                improvements.append("Simplify the color palette for more focused brand identity")
+            elif 3 <= color_count <= 5:
+                indicators['balanced_identity'] = True
+                strengths.append("Well-balanced color palette enhances brand identity without overwhelming")
+                checklist_results["Does the design match the brand's vision, mission, and values?"] = True
+            
+            # Analyze color harmony
+            if harmony_score >= 80:
+                indicators['visually_strong'] = True
+                indicators['emotional_resonance'] = True
+                strengths.append("Harmonious color palette creates emotional resonance")
+                checklist_results["Does the design evoke the desired emotions to achieve the goal?"] = True
+            elif harmony_score <= 40:
+                indicators['lacks_identity'] = True
+                improvements.append("Improve color harmony for stronger emotional impact")
+                checklist_results["Does the design evoke the desired emotions to achieve the goal?"] = False
+            
+            # Analyze whitespace
+            if white_space < 15:
+                indicators['generic_elements'] = True
+                improvements.append("Increase whitespace to create a more sophisticated, premium feel")
+            elif white_space > 40:
+                indicators['visually_strong'] = True
+                strengths.append("Generous whitespace creates a premium, sophisticated feel")
+            
+            # Analyze composition
+            composition_score = (golden_ratio + thirds_score + symmetry_score) / 3
+            
+            if composition_score >= 80:
+                indicators['memorable_aesthetics'] = True
+                indicators['balanced_identity'] = True
+                strengths.append("Balanced composition creates harmony and visual appeal")
+            elif composition_score <= 40:
+                indicators['generic_elements'] = True
+                improvements.append("Improve composition using design principles like the golden ratio or rule of thirds")
+            
+            # Determine uniqueness
+            # This is challenging without comparing to other sites, but we can infer from metrics
+            unique_score = self._calculate_uniqueness(color_count, harmony_score, white_space, composition_score)
+            
+            if unique_score >= 80:
+                indicators['unique_elements'] = True
+                indicators['memorable_aesthetics'] = True
+                strengths.append("Design has unique character that differentiates from competitors")
+                checklist_results["Is there a unique touch that differentiates it from competitors?"] = True
+            elif unique_score <= 40:
+                indicators['generic_elements'] = True
+                indicators['lacks_identity'] = True
+                improvements.append("Add more distinctive elements to differentiate from competitors")
+                checklist_results["Is there a unique touch that differentiates it from competitors?"] = False
+            
+            # Analyze wow factor
+            wow_score = self._calculate_wow_factor(harmony_score, composition_score, unique_score)
+            
+            if wow_score >= 80:
+                indicators['memorable_aesthetics'] = True
+                indicators['emotional_resonance'] = True
+                strengths.append("Design contains compelling 'wow moments' that engage users emotionally")
+                checklist_results["Is there a 'wow moment' that impresses or emotionally engages users?"] = True
+            elif wow_score <= 40:
+                indicators['lacks_wow_factor'] = True
+                indicators['limited_emotional_range'] = True
+                improvements.append("Create a memorable 'wow moment' to enhance emotional engagement")
+                checklist_results["Is there a 'wow moment' that impresses or emotionally engages users?"] = False
+            
+            # Determine thinking level based on indicators
+            level = self._determine_brand_character_level(indicators)
+            
+            # Calculate score (0-100)
+            score = self._calculate_brand_character_score(indicators, level)
+            
+            # Add level-specific analysis
+            if level == 1:  # Dandelion
+                improvements.append("Develop a more strategic and distinctive brand identity")
+            elif level == 2:  # Designer
+                strengths.append("Design has visual appeal")
+                improvements.append("Align visual elements more closely with brand strategy")
+            elif level == 3:  # Business
+                strengths.append("Brand identity effectively supports business goals")
+                improvements.append("Add more emotional depth and 'wow factor' to create memorability")
+            elif level == 4:  # 10x
+                strengths.append("Brand character perfectly balances uniqueness, emotion, and business goals")
+            
+            # Generate checklist results for remaining items
+            if "Does the design look appropriate to the client's target audience?" not in checklist_results:
+                # This is hard to determine without knowing the audience
+                checklist_results["Does the design look appropriate to the client's target audience?"] = None
+            
+            if "Are the used design elements distracting from the key goal?" not in checklist_results:
+                checklist_results["Are the used design elements distracting from the key goal?"] = not indicators['decorative_priority']
+            
+            if "Are micro-interactions and animations adding to the experience?" not in checklist_results:
+                # Cannot determine from static image
+                checklist_results["Are micro-interactions and animations adding to the experience?"] = None
+            
+            if "Are generic stock images and uninspired designs avoided?" not in checklist_results:
+                checklist_results["Are generic stock images and uninspired designs avoided?"] = not indicators['generic_elements']
+            
+            return {
+                'level': level,
+                'level_name': self.thinking_levels[level],
+                'score': score,
+                'strengths': strengths,
+                'improvements': improvements,
+                'checklist_results': checklist_results
+            }
+            
+        except Exception as e:
+            logger.error(f"Error evaluating brand character: {e}")
+            return {
+                'level': 1,
+                'level_name': self.thinking_levels[1],
+                'score': 30,
+                'strengths': [],
+                'improvements': ["Error analyzing brand character"],
+                'checklist_results': {}
+            }
+    
+    def _calculate_uniqueness(self, color_count, harmony_score, white_space, composition_score):
+        """Calculate uniqueness score based on design attributes"""
+        uniqueness = 50  # Start at neutral
+        
+        # More unique color palette (not too few, not too many)
+        if 4 <= color_count <= 6:
+            uniqueness += 10
+        elif color_count < 3 or color_count > 7:
+            uniqueness -= 10
+        
+        # Higher color harmony can be unique
+        if harmony_score > 80:
+            uniqueness += 10
+        
+        # More distinctive whitespace usage
+        if white_space > 35:  # Very generous whitespace can be distinctive
+            uniqueness += 15
+        elif white_space < 15:  # Too cramped often looks generic
+            uniqueness -= 10
+        
+        # Strong composition scores can be common
+        if composition_score > 90:
+            uniqueness -= 5  # Too perfect can be generic
+        elif 75 <= composition_score <= 85:
+            uniqueness += 5  # Good but not too perfect
+        
+        return max(0, min(100, uniqueness))
+    
+    def _calculate_wow_factor(self, harmony_score, composition_score, uniqueness_score):
+        """Calculate wow factor score based on design attributes"""
+        wow_factor = 0
+        
+        # High uniqueness is a major contributor to wow factor
+        wow_factor += uniqueness_score * 0.4
+        
+        # Strong harmony contributes to wow factor
+        wow_factor += harmony_score * 0.3
+        
+        # Good composition is necessary but not sufficient
+        if composition_score > 70:
+            wow_factor += 20
+        
+        return max(0, min(100, wow_factor))
+    
+    def _determine_brand_character_level(self, indicators):
+        """Determine brand character thinking level based on indicators"""
+        # 10x Designer (Level 4)
+        if ((indicators['memorable_aesthetics'] or indicators['unique_elements']) and
+            indicators['balanced_identity'] and 
+            indicators['emotional_resonance']):
+            return 4
+        
+        # Business Thinking (Level 3)
+        elif ((indicators['functional_brand'] or indicators['balanced_identity']) and
+              not indicators['lacks_identity']):
+            return 3
+        
+        # Designer Thinking (Level 2)
+        elif ((indicators['visually_strong'] or indicators['decorative_priority']) and
+              not indicators['no_emotional_connection']):
+            return 2
+        
+        # Dandelion Thinking (Level 1)
+        else:
+            return 1
+    
+    def _calculate_brand_character_score(self, indicators, level):
+        """Calculate brand character score (0-100)"""
+        base_scores = {1: 30, 2: 50, 3: 70, 4: 90}
+        
+        # Get base score from level
+        score = base_scores[level]
+        
+        # Adjust based on indicators
+        if indicators['generic_elements'] or indicators['lacks_identity']:
+            score -= 10
+        
+        if indicators['visually_strong']:
+            score += 5
+        
+        if indicators['emotional_resonance']:
+            score += 5
+        
+        if indicators['unique_elements']:
+            score += 10
+        
+        if indicators['memorable_aesthetics']:
+            score += 5
+        
+        if indicators['balanced_identity']:
+            score += 5
+        
+        # Ensure score stays within 0-100
+        return max(0, min(100, score))
+    
+    def evaluate_design(self, design_analysis):
+        """Evaluate a design against the 10x Designer framework"""
+        try:
+            # Get website ID
+            website_id = design_analysis.get('website_id', 'unknown')
+            
+            logger.info(f"Evaluating design: {design_analysis.get('title', 'Unnamed Design')} (ID: {website_id})")
+            
+            # Run evaluations
+            typography_eval = self.evaluate_typography(design_analysis)
+            buttons_eval = self.evaluate_buttons(design_analysis)
+            brand_eval = self.evaluate_brand_character(design_analysis)
+            
+            # Calculate overall scores and level
+            category_scores = {
+                'typography': typography_eval['score'],
+                'buttons': buttons_eval['score'],
+                'brand_character': brand_eval['score']
+            }
+            
+            avg_score = sum(category_scores.values()) / len(category_scores)
+            
+            # Determine overall level
+            category_levels = {
+                'typography': typography_eval['level'],
+                'buttons': buttons_eval['level'],
+                'brand_character': brand_eval['level']
+            }
+            
+            # Overall level is weighted average, rounded down
+            overall_level = max(1, min(4, int(sum(category_levels.values()) / len(category_levels))))
+            
+            # Compile overall strengths and improvements
+            strengths = (
+                typography_eval['strengths'] + 
+                buttons_eval['strengths'] + 
+                brand_eval['strengths']
+            )
+            
+            improvements = (
+                typography_eval['improvements'] + 
+                buttons_eval['improvements'] + 
+                brand_eval['improvements']
+            )
+            
+            # Compile final evaluation
+            evaluation = {
+                'design_id': website_id,
+                'title': design_analysis.get('title', 'Unnamed Design'),
+                'website_url': design_analysis.get('website_url'),
+                'evaluation_timestamp': datetime.now().isoformat(),
+                'overall': {
+                    'level': overall_level,
+                    'level_name': self.thinking_levels[overall_level],
+                    'score': round(avg_score, 1),
+                    'strengths': strengths,
+                    'improvements': improvements
+                },
+                'categories': {
+                    'typography': typography_eval,
+                    'buttons': buttons_eval,
+                    'brand_character': brand_eval
+                },
+                'category_scores': category_scores
+            }
+            
+            # Save evaluation
+            output_path = os.path.join(self.output_dir, f"{website_id}_evaluation.json")
+            with open(output_path, 'w') as f:
+                json.dump(evaluation, f, indent=2)
+            
+            logger.info(f"Evaluation completed for {design_analysis.get('title', 'Unnamed Design')}")
+            
+            return evaluation
+            
+        except Exception as e:
+            logger.error(f"Error evaluating design: {e}")
+            return {
+                'error': str(e),
+                'status': 'failed'
+            }
+    
+    def evaluate_from_file(self, analysis_path):
+        """Evaluate a design from an analysis file"""
+        try:
+            with open(analysis_path, 'r') as f:
+                design_analysis = json.load(f)
+            
+            return self.evaluate_design(design_analysis)
+        except Exception as e:
+            logger.error(f"Error loading analysis file {analysis_path}: {e}")
+            return None
+    
+    def create_evaluation_visualization(self, evaluation, output_path=None):
+        """Create a visualization of the evaluation results"""
+        try:
+            # Set default output path if not provided
+            if not output_path:
+                output_path = os.path.join(self.output_dir, f"{evaluation['design_id']}_evaluation_viz.png")
+            
+            # Set up the figure
+            plt.figure(figsize=(12, 8))
+            
+            # Get data
+            categories = evaluation['category_scores']
+            overall_score = evaluation['overall']['score']
+            overall_level = evaluation['overall']['level']
+            level_name = evaluation['overall']['level_name']
+            
+            # Plot category scores
+            plt.subplot(1, 2, 1)
+            categories_list = list(categories.keys())
+            scores_list = [categories[cat] for cat in categories_list]
+            colors = ['#9333ea', '#3b82f6', '#f59e0b']
+            
+            plt.bar(categories_list, scores_list, color=colors)
+            plt.axhline(y=overall_score, color='r', linestyle='--', alpha=0.7, label=f'Overall: {overall_score:.1f}')
+            plt.ylim(0, 100)
+            plt.title('Category Scores')
+            plt.ylabel('Score (0-100)')
+            plt.legend()
+            
+            # Plot thinking level diagram
+            plt.subplot(1, 2, 2)
+            levels = list(self.thinking_levels.keys())
+            level_names = list(self.thinking_levels.values())
+            
+            # Create stacked bars for levels
+            bottom = 0
+            colors = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6']
+            
+            for i, level in enumerate(levels):
+                height = 25  # Equal height for each level
+                plt.bar(0, height, bottom=bottom, color=colors[i], alpha=0.7, width=0.5)
+                
+                # Add level names to the bars
+                plt.text(0, bottom + height/2, level_names[i], ha='center', va='center')
+                
+                # Highlight current level
+                if level == overall_level:
+                    plt.axhline(y=bottom + height, color='k', linestyle='-', linewidth=2)
+                    plt.text(0.3, bottom + height/2, "← Current Level", va='center')
+                
+                bottom += height
+            
+            plt.title('Design Thinking Level')
+            plt.ylim(0, 100)
+            plt.xticks([])
+            plt.yticks([])
+            
+            plt.tight_layout()
+            plt.savefig(output_path)
+            plt.close()
+            
+            logger.info(f"Evaluation visualization saved to {output_path}")
+            
+            return output_path
+        except Exception as e:
+            logger.error(f"Error creating visualization: {e}")
+            return None
+    
+    def run_evaluations(self):
+        """Run evaluations on all analysis files"""
+        analysis_files = glob.glob(os.path.join(self.input_dir, "*_analysis.json"))
+        
+        if not analysis_files:
+            logger.error("No analysis files found to evaluate")
+            return []
+        
+        results = []
+        for analysis_path in tqdm(analysis_files, desc="Evaluating designs"):
+            if not os.path.basename(analysis_path).startswith("analysis_index"):
+                evaluation = self.evaluate_from_file(analysis_path)
+                if evaluation:
+                    results.append(evaluation)
+                    self.create_evaluation_visualization(evaluation)
+        
+        # Create an index of evaluations
+        output_path = os.path.join(self.output_dir, "evaluation_index.json")
+        with open(output_path, 'w') as f:
+            json.dump(results, f, indent=2)
+        
+        logger.info(f"Evaluations complete for {len(results)} designs")
+        return results
+    
+    def create_aggregate_report(self):
+        """Create an aggregate report of all evaluations"""
+        eval_files = glob.glob(os.path.join(self.output_dir, "*_evaluation.json"))
+        
+        if not eval_files:
+            logger.error("No evaluation files found for aggregate report")
+            return None
+        
+        evaluations = []
+        for eval_file in eval_files:
+            if not os.path.basename(eval_file).startswith("evaluation_index"):
+                try:
+                    with open(eval_file, 'r') as f:
+                        evaluations.append(json.load(f))
+                except Exception as e:
+                    logger.error(f"Error loading evaluation file {eval_file}: {e}")
+        
+        if not evaluations:
+            logger.error("No valid evaluations found")
+            return None
+        
+        # Calculate aggregate statistics
+        level_counts = {1: 0, 2: 0, 3: 0, 4: 0}
+        category_scores = {
+            'typography': [],
+            'buttons': [],
+            'brand_character': []
+        }
+        overall_scores = []
+        
+        for eval_data in evaluations:
+            overall = eval_data.get('overall', {})
+            level = overall.get('level')
+            if level:
+                level_counts[level] = level_counts.get(level, 0) + 1
+            
+            score = overall.get('score')
+            if score:
+                overall_scores.append(score)
+            
+            for category, score in eval_data.get('category_scores', {}).items():
+                if category in category_scores:
+                    category_scores[category].append(score)
+        
+        # Calculate averages
+        avg_overall = sum(overall_scores) / len(overall_scores) if overall_scores else 0
+        avg_category = {
+            cat: sum(scores) / len(scores) if scores else 0
+            for cat, scores in category_scores.items()
+        }
+        
+        # Calculate level distribution
+        total_evals = sum(level_counts.values())
+        level_distribution = {
+            level: (count / total_evals * 100) if total_evals > 0 else 0
+            for level, count in level_counts.items()
+        }
+        
+        # Find strongest and weakest categories
+        category_avgs = [(cat, avg) for cat, avg in avg_category.items()]
+        category_avgs.sort(key=lambda x: x[1], reverse=True)
+        
+        strongest_category = category_avgs[0][0] if category_avgs else None
+        weakest_category = category_avgs[-1][0] if category_avgs else None
+        
+        # Compile report
+        report = {
+            'total_evaluations': len(evaluations),
+            'average_scores': {
+                'overall': round(avg_overall, 1),
+                'categories': {cat: round(avg, 1) for cat, avg in avg_category.items()}
+            },
+            'level_distribution': {
+                'counts': level_counts,
+                'percentages': {level: round(pct, 1) for level, pct in level_distribution.items()}
+            },
+            'strongest_category': strongest_category,
+            'weakest_category': weakest_category,
+            'report_timestamp': datetime.now().isoformat()
+        }
+        
+        # Save report
+        output_path = os.path.join(self.output_dir, "aggregate_evaluation_report.json")
+        with open(output_path, 'w') as f:
+            json.dump(report, f, indent=2)
+        
+        # Create visualization
+        self._create_aggregate_viz(report)
+        
+        logger.info(f"Aggregate evaluation report created ({len(evaluations)} evaluations)")
+        return report
+    
+    def _create_aggregate_viz(self, report):
+        """Create visualization for aggregate evaluation report"""
+        try:
+            # Create figure
+            plt.figure(figsize=(15, 10))
+            
+            # Plot level distribution
+            plt.subplot(2, 2, 1)
+            levels = list(self.thinking_levels.values())
+            counts = [report['level_distribution']['counts'][i] for i in range(1, 5)]
+            
+            plt.bar(levels, counts, color=['#ef4444', '#f59e0b', '#10b981', '#3b82f6'])
+            plt.title('Thinking Level Distribution')
+            plt.ylabel('Number of Designs')
+            
+            # Plot category averages
+            plt.subplot(2, 2, 2)
+            categories = list(report['average_scores']['categories'].keys())
+            scores = [report['average_scores']['categories'][cat] for cat in categories]
+            
+            plt.bar(categories, scores, color=['#9333ea', '#3b82f6', '#f59e0b'])
+            plt.axhline(y=report['average_scores']['overall'], color='r', linestyle='--', alpha=0.7, 
+                        label=f'Overall: {report["average_scores"]["overall"]}')
+            plt.ylim(0, 100)
+            plt.title('Average Category Scores')
+            plt.ylabel('Score (0-100)')
+            plt.legend()
+            
+            # Plot level distribution as pie chart
+            plt.subplot(2, 2, 3)
+            level_pcts = [report['level_distribution']['percentages'][i] for i in range(1, 5)]
+            
+            plt.pie(level_pcts, labels=levels, autopct='%1.1f%%', startangle=90, 
+                    colors=['#ef4444', '#f59e0b', '#10b981', '#3b82f6'])
+            plt.title('Thinking Level Distribution (%)')
+            
+            # Plot recommendations focus
+            plt.subplot(2, 2, 4)
+            
+            # Calculate recommended focus based on weakest category
+            recommendations = {
+                'typography': 'Focus on improving typography hierarchy and consistency',
+                'buttons': 'Focus on improving button usability and hierarchy',
+                'brand_character': 'Focus on improving brand uniqueness and emotional appeal'
+            }
+            
+            plt.text(0.5, 0.5, f"Recommended Focus Area:\n\n{report['weakest_category'].title()}\n\n{recommendations.get(report['weakest_category'], '')}", 
+                    ha='center', va='center', fontsize=12,
+                    bbox=dict(boxstyle="round,pad=1", fc='#f3f4f6', ec='#e5e7eb'))
+            plt.axis('off')
+            plt.title('Improvement Recommendations')
+            
+            # Adjust layout and save
+            plt.tight_layout()
+            output_path = os.path.join(self.output_dir, "aggregate_evaluation_viz.png")
+            plt.savefig(output_path)
+            plt.close()
+            
+            logger.info(f"Aggregate evaluation visualization saved to {output_path}")
+            return output_path
+        except Exception as e:
+            logger.error(f"Error creating aggregate visualization: {e}")
+            return None
+
+def main():
+    logger.info("Starting 10x Designer evaluation")
+    
+    # Create evaluator
+    evaluator = DesignEvaluator(config)
+    
+    # Run evaluations
+    evaluator.run_evaluations()
+    #!/usr/bin/env python3
+"""
+10x Designer Evaluator Script
+Evaluates web designs against the 10x Designer framework criteria
+"""
+
+import os
+import json
+import sys
+import logging
+import argparse
+import numpy as np
+import matplotlib.pyplot as plt
+from datetime import datetime
+import glob
+from tqdm import tqdm
+import colorsys
+
+# Set up argument parser
+parser = argparse.ArgumentParser(description='Evaluate designs against 10x Designer framework')
+parser.add_argument('--config', type=str, default='config/evaluator_config.json', help='Path to evaluator config file')
+parser.add_argument('--input-dir', type=str, help='Override input directory (analysis results)')
+parser.add_argument('--output-dir', type=str, help='Override output directory (evaluation results)')
+args = parser.parse_args()
+
+# Load configuration
+try:
+    with open(args.config, 'r') as f:
+        config = json.load(f)
+except Exception as e:
+    print(f"Error loading configuration: {e}")
+    sys.exit(1)
+
+# Override config with command line arguments if provided
+if args.input_dir:
+    config['input_directory'] = args.input_dir
+if args.output_dir:
+    config['output_directory'] = args.output_dir
+
+# Create directories if they don't exist
+os.makedirs(config['output_directory'], exist_ok=True)
+os.makedirs(os.path.dirname(config['log_file']), exist_ok=True)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(config['log_file']),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("10xDesignerEvaluator")
+
+class DesignEvaluator:
+    """
+    Evaluates web designs against the 10x Designer framework, focusing on:
+    1. Typography & Readability
+    2. Buttons & Interactions
+    3. Character, Taste & Emotional Design (Brand)
+    """
+    
+    def __init__(self, config):
+        self.config = config
+        self.input_dir = config['input_directory']
+        self.output_dir = config['output_directory']
+        
+        # Load reference standards from analysis
+        self.reference_standards = self._load_reference_standards()
+        
+        # Define thinking levels
+        self.thinking_levels = {
+            1: "Dandelion",
+            2: "Designer", 
+            3: "Business",
+            4: "10x Designer"
+        }
+        
+        # Load rules for each category
+        self._load_evaluation_rules()
+    
+    def _load_reference_standards(self):
+        """Load reference standards from analyzed websites"""
+        try:
+            # Look for aggregate report first
+            aggregate_path = os.path.join(self.input_dir, "aggregate_report.json")
+            
+            if os.path.exists(aggregate_path):
+                with open(aggregate_path, 'r') as f:
+                    aggregate = json.load(f)
+                
+                logger.info(f"Loaded reference standards from aggregate report")
+                
+                # Convert to our standards format
+                standards = {
+                    'typography': {
+                        'avg_text_blocks': aggregate['typography_analysis']['avg_text_blocks'],
+                        'avg_size_ratio': aggregate['typography_analysis']['avg_size_ratio'],
+                        'avg_headings': aggregate['typography_analysis']['avg_headings']
+                    },
+                    'buttons': {
+                        'avg_button_count': aggregate['button_analysis']['avg_buttons'],
+                        'avg_touch_friendly': aggregate['button_analysis']['avg_touch_friendly'],
+                        'avg_hierarchy': aggregate['button_analysis']['avg_hierarchy']
+                    },
+                    'brand_character': {
+                        'avg_color_count': aggregate['color_analysis']['avg_colors'],
+                        'avg_harmony': aggregate['color_analysis']['avg_harmony'],
+                        'avg_white_space': aggregate['layout_analysis']['avg_white_space'],
+                        'avg_golden_ratio': aggregate['layout_analysis']['avg_golden_ratio']
+                    }
+                }
+                
+                return standards
+            
+            # If no aggregate report, analyze individual files
+            logger.info("Aggregate report not found, analyzing individual files")
+            analysis_index_path = os.path.join(self.input_dir, "analysis_index.json")
+            
+            if os.path.exists(analysis_index_path):
+                with open(analysis_index_path, 'r') as f:
+                    analyses = json.load(f)
+                
+                # Extract aggregate statistics for benchmarking
+                standards = {
+                    'typography': self._extract_typography_standards(analyses),
+                    'buttons': self._extract_button_standards(analyses),
+                    'brand_character': self._extract_brand_character_standards(analyses)
+                }
+                
+                logger.info(f"Loaded reference standards from {len(analyses)} analyzed websites")
+                return standards
+            else:
+                logger.warning("Analysis index not found, using default standards")
+                return self._get_default_standards()
+                
+        except Exception as e:
+            logger.error(f"Error loading reference standards: {e}")
+            return self._get_default_standards()
+    
+    def _extract_typography_standards(self, analyses):
+        """Extract typography standards from analyses"""
+        # Collect statistics on font sizes, text block counts, etc.
+        text_block_counts = []
+        size_ratios = []
+        heading_counts = []
+        
+        for analysis in analyses:
+            if 'typography_analysis' in analysis:
+                typo = analysis['typography_analysis']
+                if 'text_block_count' in typo:
+                    text_block_counts.append(typo['text_block_count'])
+                
+                if 'size_analysis' in typo:
+                    size_analysis = typo['size_analysis']
+                    if 'size_ratio' in size_analysis and size_analysis['size_ratio'] > 0:
+                        size_ratios.append(size_analysis['size_ratio'])
+                    
+                    if 'potential_headings' in size_analysis:
+                        heading_counts.append(size_analysis['potential_headings'])
+        
+        # Calculate averages
+        if text_block_counts and size_ratios and heading_counts:
+            return {
+                'avg_text_blocks': sum(text_block_counts) / len(text_block_counts),
+                'avg_size_ratio': sum(size_ratios) / len(size_ratios),
+                'avg_headings': sum(heading_counts) / len(heading_counts)
+            }
+        else:
+            return self._get_default_standards()['typography']
+    
+    def _extract_button_standards(self, analyses):
+        """Extract button standards from analyses"""
+        button_counts = []
+        touch_friendly_pcts = []
+        hierarchy_scores = []
+        
+        for analysis in analyses:
+            if 'buttons' in analysis:
+                buttons = analysis['buttons']
+                if 'count' in buttons:
+                    button_counts.append(buttons['count'])
+                
+                if 'touch_friendly_percentage' in buttons:
+                    touch_friendly_pcts.append(buttons['touch_friendly_percentage'])
+                
+                if 'button_hierarchy_score' in buttons:
+                    hierarchy_scores.append(buttons['button_hierarchy_score'])
+        
+        if button_counts and touch_friendly_pcts and hierarchy_scores:
+            return {
+                'avg_button_count': sum(button_counts) / len(button_counts),
+                'avg_touch_friendly': sum(touch_friendly_pcts) / len(touch_friendly_pcts),
+                'avg_hierarchy': sum(hierarchy_scores) / len(hierarchy_scores)
+            }
+        else:
+            return self._get_default_standards()['buttons']
+    
+    def _extract_brand_character_standards(self, analyses):
+        """Extract brand character standards from analyses"""
+        color_counts = []
+        harmony_scores = []
+        white_space_percentages = []
+        golden_ratio_scores = []
+        
+        for analysis in analyses:
+            if 'color_analysis' in analysis and 'extracted_colors' in analysis['color_analysis']:
+                color_counts.append(len(analysis['color_analysis']['extracted_colors']))
+            
+            if 'color_analysis' in analysis and 'harmony_score' in analysis['color_analysis']:
+                harmony_scores.append(analysis['color_analysis']['harmony_score'])
+            
+            if 'layout_analysis' in analysis:
+                layout = analysis['layout_analysis']
+                if 'white_space_percentage' in layout:
+                    white_space_percentages.append(layout['white_space_percentage'])
+                
+                if 'golden_ratio_score' in layout:
+                    golden_ratio_scores.append(layout['golden_ratio_score'])
+        
+        if color_counts and harmony_scores and white_space_percentages and golden_ratio_scores:
+            return {
+                'avg_color_count': sum(color_counts) / len(color_counts),
+                'avg_harmony': sum(harmony_scores) / len(harmony_scores),
+                'avg_white_space': sum(white_space_percentages) / len(white_space_percentages),
+                'avg_golden_ratio': sum(golden_ratio_scores) / len(golden_ratio_scores)
+            }
+        else:
+            return self._get_default_standards()['brand_character']
+    
+    def _get_default_standards(self):
+        """Default standards when no reference data is available"""
+        return {
+            'typography': {
+                'avg_text_blocks': 15,
+                'avg_size_ratio': 3.0,
+                'avg_headings': 3
+            },
+            'buttons': {
+                'avg_button_count': 5,
+                'avg_touch_friendly': 60,
+                'avg_hierarchy': 70
+            },
+            'brand_character': {
+                'avg_color_count': 4,
+                'avg_harmony': 70,
+                'avg_white_space': 30,
+                'avg_golden_ratio': 75
+            }
+        }
+    
+    def _load_evaluation_rules(self):
+        """Load rules for the 10x Designer framework"""
+        rules_path = self.config.get('rules_file')
+        
+        if rules_path and os.path.exists(rules_path):
+            try:
+                with open(rules_path, 'r') as f:
+                    self.rules = json.load(f)
+                logger.info(f"Loaded evaluation rules from {rules_path}")
+                return
+            except Exception as e:
+                logger.error(f"Error loading rules file: {e}")
+                # Fall back to default rules
+        
+        # Default rules if no file provided or loading failed
+        self.rules = {
+            # Typography & Readability rules
+            'typography': {
+                'checklist': [
+                    "Does the typography match the brand personality?",
+                    "Is letter-spacing & word-spacing optimal for readability?",
+                    "Do headline and body fonts complement each other?",
+                    "Does typography adjust properly across screen sizes?",
+                    "Is there consistency in font usage across the website?"
+                ],
+                'levels': {
+                    1: { # Dandelion Thinking
+                        'criteria': [
+                            "Uses trendy fonts without strategic thought",
+                            "No hierarchy",
+                            "Random spacing",
+                            "Purely aesthetic choices"
+                        ],
+                        'indicators': {
+                            'inconsistent_sizes': True,
+                            'poor_contrast': True,
+                            'extreme_ratio': True  # Too much or too little difference between sizes
+                        }
+                    },
+                    2: { # Designer Thinking
+                        'criteria': [
+                            "Starts pairing fonts creatively",
+                            "May prioritize style over function",
+                            "Reads well but lacks accessibility & adaptability"
+                        ],
+                        'indicators': {
+                            'aesthetic_focus': True,
+                            'good_pairing': True,
+                            'limited_hierarchy': True
+                        }
+                    },
+                    3: { # Business Thinking
+                        'criteria': [
+                            "Prioritizes readability, consistency, and device adaptability",
+                            "Typography follows branding, but may lack a unique signature"
+                        ],
+                        'indicators': {
+                            'consistent_usage': True,
+                            'good_readability': True,
+                            'lacks_uniqueness': True
+                        }
+                    },
+                    4: { # 10x Designer
+                        'criteria': [
+                            "Merges aesthetics, usability, and strategy",
+                            "Fonts match brand psychology",
+                            "Scales dynamically",
+                            "Enhances messaging"
+                        ],
+                        'indicators': {
+                            'perfect_hierarchy': True,
+                            'brand_aligned': True,
+                            'dynamic_scale': True,
+                            'enhances_content': True
+                        }
+                    }
+                }
+            },
+            
+            # Buttons & Interactions rules
+            'buttons': {
+                'checklist': [
+                    "Does the button intuitively trigger the desired action?",
+                    "Are there subtle but effective micro-animations?",
+                    "Are buttons optimized for touchscreens (at least 48px size)?",
+                    "Are there clear states for Default, Hover, Active, and Disabled?",
+                    "Is it clear that it's a button (clickability)?"
+                ],
+                'levels': {
+                    1: { # Dandelion Thinking
+                        'criteria': [
+                            "Buttons don't stand out or guide users",
+                            "Not UI/UX friendly",
+                            "Poor affordance (unclear they're interactive)"
+                        ],
+                        'indicators': {
+                            'poor_contrast': True,
+                            'inconsistent_style': True,
+                            'poor_sizing': True
+                        }
+                    },
+                    2: { # Designer Thinking
+                        'criteria': [
+                            "Flashy but not always effective",
+                            "Prioritizes aesthetics over usability",
+                            "May lack clarity in purpose"
+                        ],
+                        'indicators': {
+                            'overly_decorative': True,
+                            'aesthetic_focus': True,
+                            'inconsistent_purpose': True
+                        }
+                    },
+                    3: { # Business Thinking
+                        'criteria': [
+                            "Prioritizes function but may lack branding",
+                            "May use dark patterns or nudging",
+                            "Conversion-focused but generic"
+                        ],
+                        'indicators': {
+                            'functional_priority': True,
+                            'lacks_brand_identity': True,
+                            'possible_dark_patterns': True
+                        }
+                    },
+                    4: { # 10x Designer
+                        'criteria': [
+                            "Uses micro-interactions",
+                            "Touch-friendly design",
+                            "Compelling CTAs",
+                            "Clear hierarchy of actions"
+                        ],
+                        'indicators': {
+                            'micro_interactions': True,
+                            'touch_friendly': True,
+                            'compelling_cta': True,
+                            'clear_hierarchy': True
+                        }
+                    }
+                }
+            },
+            
+            # Character, Taste & Emotional Design (Brand) rules
+            'brand_character': {
+                'checklist': [
+                    "Does the design look appropriate to the client's target audience?",
+                    "Are the used design elements distracting from the key goal?",
+                    "Does the design match the brand's vision, mission, and values?",
+                    "Does the design evoke the desired emotions to achieve the goal?",
+                    "Are micro-interactions and animations adding to the experience?",
+                    "Is there a unique touch that differentiates it from competitors?",
+                    "Is there a 'wow moment' that impresses or emotionally engages users?",
+                    "Are generic stock images and uninspired designs avoided?"
+                ],
+                'levels': {
+                    1: { # Dandelion Thinking
+                        'criteria': [
+                            "No unique branding or emotional engagement",
+                            "Generic, template-like design",
+                            "No strategic identity"
+                        ],
+                        'indicators': {
+                            'generic_elements': True,
+                            'lacks_identity': True,
+                            'no_emotional_connection': True
+                        }
+                    },
+                    2: { # Designer Thinking
+                        'criteria': [
+                            "Strong visuals but could lack purpose",
+                            "Aesthetic-focused but may miss brand alignment",
+                            "Decoration over strategic identity"
+                        ],
+                        'indicators': {
+                            'visually_strong': True,
+                            'lacks_strategic_purpose': True,
+                            'decorative_priority': True
+                        }
+                    },
+                    3: { # Business Thinking
+                        'criteria': [
+                            "Effective but may lack a 'wow moment'",
+                            "Functional brand expression",
+                            "Missing emotional depth"
+                        ],
+                        'indicators': {
+                            'functional_brand': True,
+                            'lacks_wow_factor': True,
+                            'limited_emotional_range': True
+                        }
+                    },
+                    4: { # 10x Designer
+                        'criteria': [
+                            "Creates iconic, memorable brand aesthetics",
+                            "Perfect balance of identity and function",
+                            "Emotional resonance with target audience",
+                            "Unique and differentiating elements"
+                        ],
+                        'indicators': {
+                            'memorable_aesthetics': True,
+                            'balanced_identity': True,
+                            'emotional_resonance': True,
+                            'unique_elements': True
+                        }
+                    }
+                }
+            }
+        }
+        
+        logger.info("Using default evaluation rules")
+    
+    def evaluate_typography(self, design_analysis):
+        """Evaluate typography against the 10x Designer framework"""
+        try:
+            typo = design_analysis.get('typography_analysis', {})
+            layout = design_analysis.get('layout_analysis', {})
+            
+            if not typo or not layout:
+                logger.warning("Missing typography or layout analysis data")
+                return {
+                    'level': 1,
+                    'level_name': self.thinking_levels[1],
+                    'score': 30,
+                    'strengths': ["Insufficient data for detailed typography analysis"],
+                    'improvements': ["Upload a clearer image for better typography analysis"],
+                    'checklist_results': {}
+                }
+            
+            # Extract key metrics
+            text_block_count = typo.get('text_block_count', 0)
+            size_analysis = typo.get('size_analysis', {})
+            min_size = size_analysis.get('min_size', 0)
+            max_size = size_analysis.get('max_size', 0)
+            avg_size = size_analysis.get('avg_size', 0)
+            potential_headings = size_analysis.get('potential_headings', 0)
+            
+            # Calculate size ratio (if possible)
+            size_ratio = size_analysis.get('size_ratio', 0)
+            
+            # Compare to reference standards
+            ref = self.reference_standards['typography']
+            
+            # Initialize evaluation metrics
+            indicators = {
+                'inconsistent_sizes': False,
+                'poor_contrast': False,
+                'extreme_ratio': False,
+                'aesthetic_focus': False,
+                'good_pairing': False,
+                'limited_hierarchy': False,
+                'consistent_usage': False,
+                'good_readability': False,
+                'lacks_uniqueness': False,
+                'perfect_hierarchy': False,
+                'brand_aligned': False,
+                'dynamic_scale': False,
+                'enhances_content': False
+            }
+            
+            strengths = []
+            improvements = []
+            checklist_results = {}
+            
+            # Analyze typography hierarchy
+            if size_ratio < 1.5:
+                indicators['inconsistent_sizes'] = True
+                indicators['poor_contrast'] = True
+                improvements.append("Improve typographic hierarchy with clearer size differences between headings and body text")
+                checklist_results["Do headline and body fonts complement each other?"] = False
+            elif size_ratio > 4.5:
+                indicators['extreme_ratio'] = True
+                improvements.append("Reduce the extreme contrast between largest and smallest text for better readability")
+                checklist_results["Is letter-spacing & word-spacing optimal for readability?"] = False
+            elif 2.8 <= size_ratio <= 4.0:
+                indicators['good_pairing'] = True
+                strengths.append("Good typographic scale with clear hierarchy between headings and body text")
+                checklist_results["Do headline and body fonts complement each other?"] = True
+            
+            # Analyze consistency
+            if potential_headings > 0 and potential_headings <= 5:
+                indicators['consistent_usage'] = True
+                strengths.append("Consistent use of heading styles creates a coherent typographic system")
+                checklist_results["Is there consistency in font usage across the website?"] = True
+            elif potential_headings > 5:
+                indicators['inconsistent_sizes'] = True
+                improvements.append("Reduce the number of different heading sizes for more consistency")
+                checklist_results["Is there consistency in font usage across the website?"] = False
+            
+            # Analyze readability
+            if min_size >= 12:  # Assuming pixels, minimum readable size
+                indicators['good_readability'] = True
+                strengths.append("Body text size ensures good readability")
+                checklist_results["Is letter-spacing & word-spacing optimal for readability?"] = True
+            else:
+                indicators['poor_contrast'] = True
+                improvements.append("Increase body text size to improve readability (minimum 12px recommended)")
+                checklist_results["Is letter-spacing & word-spacing optimal for readability?"] = False
+            
+            # Analyze hierarchy
+            if 2.5 <= size_ratio <= 4.0 and potential_headings >= 2 and potential_headings <= 4:
+                indicators['perfect_hierarchy'] = True
+                strengths.append("Excellent typographic hierarchy guides the user's attention effectively")
+            
+            # Determine thinking level based on indicators
+            level = self._determine_typography_level(indicators)
+            
+            # Calculate score (0-100)
+            score = self._calculate_typography_score(indicators, level)
+            
+            # Add level-specific analysis
+            if level == 1:  # Dandelion
+                improvements.append("Establish a more strategic typographic hierarchy")
+                improvements.append("Create more consistent spacing and sizing")
+            elif level == 2:  # Designer
+                strengths.append("Typography has aesthetic appeal")
+                improvements.append("Ensure typography supports content hierarchy beyond just looking good")
+            elif level == 3:  # Business
+                strengths.append("Typography prioritizes readability and consistency")
+                improvements.append("Add more unique typographic character to enhance brand identity")
+            elif level == 4:  # 10x
+                strengths.append("Typography masterfully balances aesthetics, readability, and brand identity")
+            
+            # Generate checklist results for remaining items
+            if "Does the typography match the brand personality?" not in checklist_results:
+                checklist_results["Does the typography match the brand personality?"] = (level >= 3)
+            
+            if "Does typography adjust properly across screen sizes?" not in checklist_results:
+                # This is hard to determine from a single screenshot
+                checklist_results["Does typography adjust properly across screen sizes?"] = None
+            
+            return {
+                'level': level,
+                'level_name': self.thinking_levels[level],
+                'score': score,
+                'strengths': strengths,
+                'improvements': improvements,
+                'checklist_results': checklist_results
+            }
+            
+        except Exception as e:
+            logger.error(f"Error evaluating typography: {e}")
+            return {
+                'level': 1,
+                'level_name': self.thinking_levels[1],
+                'score': 30,
+                'strengths': [],
+                'improvements': ["Error analyzing typography"],
+                'checklist_results': {}
+            }
+    
+    def _determine_typography_level(self, indicators):
+        """Determine typography thinking level based on indicators"""
+        # 10x Designer (Level 4)
+        if (indicators['perfect_hierarchy'] and 
+            indicators['good_readability'] and 
+            (indicators['brand_aligned'] or indicators['enhances_content'])):
+            return 4
+        
+        # Business Thinking (Level 3)
+        elif (indicators['consistent_usage'] and 
+              indicators['good_readability'] and 
+              not indicators['poor_contrast']):
+            return 3
+        
+        # Designer Thinking (Level 2)
+        elif ((indicators['good_pairing'] or indicators['aesthetic_focus']) and 
+              not indicators['inconsistent_sizes']):
+            return 2
+        
+        # Dandelion Thinking (Level 1)
+        else:
+            return 1
+    
+    def _calculate_typography_score(self, indicators, level):
+        """Calculate typography score (0-100)"""
+        base_scores = {1: 30, 2: 50, 3: 70, 4: 90}
+        
+        # Get base score from level
+        score = base_scores[level]
+        
+        # Adjust based on indicators
+        if indicators['inconsistent_sizes'] or indicators['poor_contrast']:
+            score -= 10
+        
+        if indicators['good_pairing']:
+            score += 5
+        
+        if indicators['consistent_usage']:
+            score += 5
+        
+        if indicators['good_readability']:
+            score += 5
+        
+        if indicators['perfect_hierarchy']:
+            score += 10
+        
+        # Ensure score stays within 0-100
+        return max(0, min(100, score))
+    
+    def evaluate_buttons(self, design_analysis):
+        """Evaluate buttons against the 10x Designer framework"""
+        try:
+            button_data = design_analysis.get('buttons', {})
+            
+            if not button_data:
+                logger.warning("Missing button analysis data")
+                return {
+                    'level': 1,
+                    'level_name': self.thinking_levels[1],
+                    'score': 30,
+                    'strengths': ["Insufficient data for detailed button analysis"],
+                    'improvements': ["Ensure buttons are clearly visible in the design"],
+                    'checklist_results': {}
+                }
+            
+            # Extract key metrics
+            button_count = button_data.get('count', 0)
+            buttons = button_data.get('buttons', [])
+            touch_friendly_percentage = button_data.get('touch_friendly_percentage', 0)
+            button_hierarchy_score = button_data.get('button_hierarchy_score', 0)
+            
+            # Initialize evaluation metrics
+            indicators = {
+                'poor_contrast': False,
+                'inconsistent_style': False,
+                'poor_sizing': False,
+                'overly_decorative': False,
+                'aesthetic_focus': False,
+                'inconsistent_purpose': False,
+                'functional_priority': False,
+                'lacks_brand_identity': False,
+                'possible_dark_patterns': False,
+                'micro_interactions': False,  # Hard to detect from static image
+                'touch_friendly': False,
+                'compelling_cta': False,
+                'clear_hierarchy': False
+            }
+            
+            strengths = []
+            improvements = []
+            checklist_results = {}
+            
+            # Analyze button count
+            if button_count == 0:
+                return {
+                    'level': 1,
+                    'level_name': self.thinking_levels[1],
+                    'score': 20,
+                    'strengths': ["No buttons detected in the design"],
+                    'improvements': ["Add clear call-to-action buttons to guide user actions"],
+                    'checklist_results': {
+                        "Is it clear that it's a button (clickability)?": False
+                    }
+                }
+            
+            # Check for touch-friendly sizing
+            if touch_friendly_percentage >= 80:  # 80% or more buttons are touch-friendly
+                indicators['touch_friendly']
