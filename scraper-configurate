@@ -1,0 +1,25 @@
+{
+  "url": "https://godly.website",
+  "max_pages": 10,
+  "max_sites": 50,
+  "delay_seconds": 2,
+  "output_directory": "data/raw/godly",
+  "screenshots_directory": "data/raw/godly/screenshots",
+  "metadata_directory": "data/raw/godly/metadata",
+  "log_file": "logs/scraper.log",
+  "browser_settings": {
+    "headless": true,
+    "window_width": 1920,
+    "window_height": 1080,
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+  },
+  "selectors": {
+    "website_cards": ".w-dyn-item .website-card",
+    "website_link": "a",
+    "website_title": ".website-content h1",
+    "website_tags": ".website-tags .tag-link",
+    "website_preview": ".website-hero",
+    "website_url": ".visit-website-container a",
+    "color_list": ".color-list-wrapper .color"
+  }
+}
